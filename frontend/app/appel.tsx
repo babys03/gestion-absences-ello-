@@ -412,6 +412,41 @@ export default function AppelScreen() {
         </View>
       </View>
 
+      {/* Export Buttons */}
+      <View style={styles.exportBar}>
+        <Text style={styles.exportLabel}>Exporter la feuille:</Text>
+        <View style={styles.exportButtons}>
+          <TouchableOpacity
+            style={[styles.exportBtn, styles.exportBtnExcel]}
+            onPress={() => exportAttendance('excel')}
+            disabled={exporting}
+          >
+            {exporting ? (
+              <ActivityIndicator size="small" color="#FFFFFF" />
+            ) : (
+              <>
+                <Ionicons name="document-text" size={16} color="#FFFFFF" />
+                <Text style={styles.exportBtnText}>Excel</Text>
+              </>
+            )}
+          </TouchableOpacity>
+          <TouchableOpacity
+            style={[styles.exportBtn, styles.exportBtnPdf]}
+            onPress={() => exportAttendance('pdf')}
+            disabled={exporting}
+          >
+            {exporting ? (
+              <ActivityIndicator size="small" color="#FFFFFF" />
+            ) : (
+              <>
+                <Ionicons name="print" size={16} color="#FFFFFF" />
+                <Text style={styles.exportBtnText}>PDF</Text>
+              </>
+            )}
+          </TouchableOpacity>
+        </View>
+      </View>
+
       {/* Legend */}
       <View style={styles.legend}>
         <Text style={styles.legendTitle}>Légende:</Text>
