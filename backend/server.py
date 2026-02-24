@@ -905,39 +905,81 @@ async def export_daily_attendance_excel(date: str, class_id: Optional[str] = Non
         ws = workbook.add_worksheet(class_name[:31])  # Sheet name max 31 chars
         
         # Title
-        ws.merge_range('A1:E1', f'Feuille d\'appel - {class_name} - {date}', title_format)
+        ws.merge_range('A1:F1', f'Feuille d\'appel - {class_name} - {date}', title_format)
         ws.set_row(0, 30)
         
         # Headers
-        headers = ['N°', 'Nom', 'Prénom', 'Statut', 'Motif']
+        headers = ['N°', 'Nom', 'Prénom', 'Matin', 'Après-midi', 'Motif']
         for col, header in enumerate(headers):
             ws.write(2, col, header, header_format)
         
         ws.set_column(0, 0, 5)   # N°
-        ws.set_column(1, 1, 20)  # Nom
-        ws.set_column(2, 2, 20)  # Prénom
-        ws.set_column(3, 3, 15)  # Statut
-        ws.set_column(4, 4, 30)  # Motif
+        ws.set_column(1, 1, 18)  # Nom
+        ws.set_column(2, 2, 18)  # Prénom
+        ws.set_column(3, 3, 12)  # Matin
+        ws.set_column(4, 4, 12)  # Après-midi
+        ws.set_column(5, 5, 25)  # Motif
         
         # Sort students by last name
         class_students.sort(key=lambda s: s["last_name"])
         
+        # Build absence map for this class by period
+        student_absences = {}
+        for absence in absences:
+            if absence["student_id"] in [str(s["_id"]) for s in class_students]:
+                sid = absence["student_id"]
+                if sid not in student_absences:
+                    student_absences[sid] = {"matin": None, "apresmidi": None}
+                period = absence.get("period", "journee")
+                if period == "matin":
+                    student_absences[sid]["matin"] = absence
+                elif period == "apresmidi":
+                    student_absences[sid]["apresmidi"] = absence
+                elif period == "journee":
+                    student_absences[sid]["matin"] = absence
+                    student_absences[sid]["apresmidi"] = absence
+        
         row = 3
-        absent_count = 0
+        absent_matin_count = 0
+        absent_apresmidi_count = 0
         for idx, student in enumerate(class_students):
             student_id = str(student["_id"])
-            absence = absence_map.get(student_id)
+            abs_data = student_absences.get(student_id, {"matin": None, "apresmidi": None})
             
             ws.write(row, 0, idx + 1, cell_format)
             ws.write(row, 1, student["last_name"], cell_format)
             ws.write(row, 2, student["first_name"], cell_format)
             
-            if absence:
-                absent_count += 1
-                if absence.get("type") == "justifiée":
-                    ws.write(row, 3, "Absent (J)", justified_format)
-                else:
-                    ws.write(row, 3, "Absent", absent_format)
+            # Matin
+            if abs_data["matin"]:
+                absent_matin_count += 1
+                fmt = justified_format if abs_data["matin"].get("type") == "justifiée" else absent_format
+                ws.write(row, 3, "Abs (J)" if abs_data["matin"].get("type") == "justifiée" else "Absent", fmt)
+            else:
+                ws.write(row, 3, "Présent", present_format)
+            
+            # Après-midi
+            if abs_data["apresmidi"]:
+                absent_apresmidi_count += 1
+                fmt = justified_format if abs_data["apresmidi"].get("type") == "justifiée" else absent_format
+                ws.write(row, 4, "Abs (J)" if abs_data["apresmidi"].get("type") == "justifiée" else "Absent", fmt)
+            else:
+                ws.write(row, 4, "Présent", present_format)
+            
+            # Motif (from any absence)
+            reason = ""
+            if abs_data["matin"]:
+                reason = abs_data["matin"].get("reason", "") or ""
+            elif abs_data["apresmidi"]:
+                reason = abs_data["apresmidi"].get("reason", "") or ""
+            ws.write(row, 5, reason, cell_format)
+            
+            row += 1
+        
+        # Summary
+        row += 1
+        ws.write(row, 0, "Résumé:", header_format)
+        ws.merge_range(row, 1, row, 5, f"Matin - Absents: {absent_matin_count} | Après-midi - Absents: {absent_apresmidi_count} | Total élèves: {len(class_students)}", cell_format)
                 ws.write(row, 4, absence.get("reason", ""), cell_format)
             else:
                 ws.write(row, 3, "Présent", present_format)
