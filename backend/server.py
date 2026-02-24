@@ -1114,6 +1114,342 @@ async def export_daily_attendance_pdf(date: str, class_id: Optional[str] = None)
     }
 
 
+@api_router.get("/export/all-absents/excel")
+async def export_all_absents_excel(date: str):
+    """Export all absent students from all classes for a given date to Excel"""
+    # Get all absences for this date
+    absences = await db.absences.find({"date": date}).to_list(1000)
+    
+    if not absences:
+        # Return empty file with message
+        output = io.BytesIO()
+        workbook = xlsxwriter.Workbook(output, {'in_memory': True})
+        ws = workbook.add_worksheet('Absents')
+        ws.write(0, 0, f"Aucun absent le {date}")
+        workbook.close()
+        output.seek(0)
+        return {
+            "filename": f"tous_absents_{date}.xlsx",
+            "content": base64.b64encode(output.getvalue()).decode('utf-8'),
+            "content_type": "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+        }
+    
+    output = io.BytesIO()
+    workbook = xlsxwriter.Workbook(output, {'in_memory': True})
+    
+    # Styles
+    title_format = workbook.add_format({
+        'bold': True,
+        'font_size': 14,
+        'align': 'center',
+        'valign': 'vcenter',
+        'bg_color': '#EF4444',
+        'font_color': 'white'
+    })
+    header_format = workbook.add_format({
+        'bold': True,
+        'bg_color': '#374151',
+        'font_color': 'white',
+        'border': 1,
+        'align': 'center',
+        'valign': 'vcenter'
+    })
+    cell_format = workbook.add_format({
+        'border': 1,
+        'align': 'left',
+        'valign': 'vcenter'
+    })
+    justified_format = workbook.add_format({
+        'border': 1,
+        'bg_color': '#FEF3C7',
+        'align': 'center',
+        'font_color': '#D97706',
+        'bold': True
+    })
+    unjustified_format = workbook.add_format({
+        'border': 1,
+        'bg_color': '#FEE2E2',
+        'align': 'center',
+        'font_color': '#DC2626',
+        'bold': True
+    })
+    
+    ws = workbook.add_worksheet('Tous les Absents')
+    
+    # Title
+    ws.merge_range('A1:F1', f'RÉCAPITULATIF DES ABSENTS - {date}', title_format)
+    ws.set_row(0, 25)
+    
+    # Headers
+    headers = ['N°', 'Nom', 'Prénom', 'Classe', 'Type', 'Motif']
+    for col, header in enumerate(headers):
+        ws.write(2, col, header, header_format)
+    
+    ws.set_column(0, 0, 5)   # N°
+    ws.set_column(1, 1, 20)  # Nom
+    ws.set_column(2, 2, 20)  # Prénom
+    ws.set_column(3, 3, 15)  # Classe
+    ws.set_column(4, 4, 15)  # Type
+    ws.set_column(5, 5, 35)  # Motif
+    
+    # Get class info
+    classes = await db.classes.find().to_list(100)
+    class_map = {str(c["_id"]): c["name"] for c in classes}
+    
+    # Build data sorted by class then name
+    absent_data = []
+    for absence in absences:
+        student = await db.students.find_one({"_id": ObjectId(absence["student_id"])})
+        if student:
+            class_name = class_map.get(student["class_id"], "Inconnu")
+            absent_data.append({
+                "last_name": student["last_name"],
+                "first_name": student["first_name"],
+                "class_name": class_name,
+                "type": absence.get("type", "non_justifiée"),
+                "reason": absence.get("reason", ""),
+            })
+    
+    # Sort by class name then last name
+    absent_data.sort(key=lambda x: (x["class_name"], x["last_name"]))
+    
+    row = 3
+    for idx, data in enumerate(absent_data):
+        ws.write(row, 0, idx + 1, cell_format)
+        ws.write(row, 1, data["last_name"], cell_format)
+        ws.write(row, 2, data["first_name"], cell_format)
+        ws.write(row, 3, data["class_name"], cell_format)
+        
+        type_fmt = justified_format if data["type"] == "justifiée" else unjustified_format
+        ws.write(row, 4, "Justifiée" if data["type"] == "justifiée" else "Non justifiée", type_fmt)
+        ws.write(row, 5, data["reason"] or "", cell_format)
+        row += 1
+    
+    # Summary by class
+    row += 2
+    ws.write(row, 0, "RÉSUMÉ PAR CLASSE", header_format)
+    ws.merge_range(row, 1, row, 5, "", header_format)
+    row += 1
+    
+    class_counts = {}
+    for data in absent_data:
+        class_name = data["class_name"]
+        if class_name not in class_counts:
+            class_counts[class_name] = {"justified": 0, "unjustified": 0}
+        if data["type"] == "justifiée":
+            class_counts[class_name]["justified"] += 1
+        else:
+            class_counts[class_name]["unjustified"] += 1
+    
+    ws.write(row, 0, "Classe", header_format)
+    ws.write(row, 1, "Justifiées", header_format)
+    ws.write(row, 2, "Non justifiées", header_format)
+    ws.write(row, 3, "Total", header_format)
+    row += 1
+    
+    total_j = 0
+    total_nj = 0
+    for class_name, counts in sorted(class_counts.items()):
+        ws.write(row, 0, class_name, cell_format)
+        ws.write(row, 1, counts["justified"], justified_format)
+        ws.write(row, 2, counts["unjustified"], unjustified_format)
+        ws.write(row, 3, counts["justified"] + counts["unjustified"], cell_format)
+        total_j += counts["justified"]
+        total_nj += counts["unjustified"]
+        row += 1
+    
+    # Total row
+    ws.write(row, 0, "TOTAL", header_format)
+    ws.write(row, 1, total_j, justified_format)
+    ws.write(row, 2, total_nj, unjustified_format)
+    ws.write(row, 3, total_j + total_nj, header_format)
+    
+    workbook.close()
+    output.seek(0)
+    
+    return {
+        "filename": f"tous_absents_{date}.xlsx",
+        "content": base64.b64encode(output.getvalue()).decode('utf-8'),
+        "content_type": "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+    }
+
+
+@api_router.get("/export/all-absents/pdf")
+async def export_all_absents_pdf(date: str):
+    """Export all absent students from all classes for a given date to PDF"""
+    # Get all absences for this date
+    absences = await db.absences.find({"date": date}).to_list(1000)
+    
+    # Get class info
+    classes = await db.classes.find().to_list(100)
+    class_map = {str(c["_id"]): c["name"] for c in classes}
+    
+    # Build data
+    absent_data = []
+    for absence in absences:
+        student = await db.students.find_one({"_id": ObjectId(absence["student_id"])})
+        if student:
+            class_name = class_map.get(student["class_id"], "Inconnu")
+            absent_data.append({
+                "last_name": student["last_name"],
+                "first_name": student["first_name"],
+                "class_name": class_name,
+                "type": absence.get("type", "non_justifiée"),
+                "reason": absence.get("reason", ""),
+            })
+    
+    # Sort by class name then last name
+    absent_data.sort(key=lambda x: (x["class_name"], x["last_name"]))
+    
+    # Create PDF
+    buffer = io.BytesIO()
+    doc = SimpleDocTemplate(
+        buffer,
+        pagesize=A4,
+        rightMargin=15*mm,
+        leftMargin=15*mm,
+        topMargin=15*mm,
+        bottomMargin=15*mm
+    )
+    
+    elements = []
+    styles = getSampleStyleSheet()
+    
+    # Title style
+    title_style = ParagraphStyle(
+        'CustomTitle',
+        parent=styles['Heading1'],
+        fontSize=18,
+        spaceAfter=5,
+        textColor=colors.HexColor('#DC2626'),
+        alignment=1
+    )
+    
+    subtitle_style = ParagraphStyle(
+        'Subtitle',
+        parent=styles['Normal'],
+        fontSize=12,
+        spaceAfter=15,
+        textColor=colors.HexColor('#6B7280'),
+        alignment=1
+    )
+    
+    # Title
+    elements.append(Paragraph("RÉCAPITULATIF DES ABSENTS", title_style))
+    elements.append(Paragraph(f"Date: {date}", subtitle_style))
+    elements.append(Paragraph(f"Total: {len(absent_data)} absent(s)", subtitle_style))
+    
+    if absent_data:
+        # Table data
+        table_data = [['N°', 'Nom', 'Prénom', 'Classe', 'Type', 'Motif']]
+        
+        for idx, data in enumerate(absent_data):
+            type_text = "J" if data["type"] == "justifiée" else "NJ"
+            table_data.append([
+                str(idx + 1),
+                data["last_name"],
+                data["first_name"],
+                data["class_name"],
+                type_text,
+                (data["reason"] or "")[:25]
+            ])
+        
+        # Create table
+        table = Table(table_data, colWidths=[10*mm, 40*mm, 40*mm, 25*mm, 15*mm, 40*mm])
+        
+        style_commands = [
+            ('BACKGROUND', (0, 0), (-1, 0), colors.HexColor('#DC2626')),
+            ('TEXTCOLOR', (0, 0), (-1, 0), colors.white),
+            ('ALIGN', (0, 0), (-1, -1), 'CENTER'),
+            ('ALIGN', (1, 1), (2, -1), 'LEFT'),
+            ('ALIGN', (5, 1), (5, -1), 'LEFT'),
+            ('FONTNAME', (0, 0), (-1, 0), 'Helvetica-Bold'),
+            ('FONTSIZE', (0, 0), (-1, -1), 9),
+            ('BOTTOMPADDING', (0, 0), (-1, 0), 10),
+            ('TOPPADDING', (0, 0), (-1, 0), 10),
+            ('GRID', (0, 0), (-1, -1), 0.5, colors.HexColor('#D1D5DB')),
+            ('VALIGN', (0, 0), (-1, -1), 'MIDDLE'),
+            ('ROWBACKGROUNDS', (0, 1), (-1, -1), [colors.white, colors.HexColor('#FEF2F2')]),
+        ]
+        
+        # Color type column
+        for i, row in enumerate(table_data[1:], start=1):
+            if row[4] == "J":
+                style_commands.append(('BACKGROUND', (4, i), (4, i), colors.HexColor('#FEF3C7')))
+            else:
+                style_commands.append(('BACKGROUND', (4, i), (4, i), colors.HexColor('#FEE2E2')))
+        
+        table.setStyle(TableStyle(style_commands))
+        elements.append(table)
+        
+        # Summary by class
+        elements.append(Spacer(1, 20))
+        elements.append(Paragraph("Résumé par classe", styles['Heading2']))
+        
+        class_counts = {}
+        for data in absent_data:
+            class_name = data["class_name"]
+            if class_name not in class_counts:
+                class_counts[class_name] = {"justified": 0, "unjustified": 0}
+            if data["type"] == "justifiée":
+                class_counts[class_name]["justified"] += 1
+            else:
+                class_counts[class_name]["unjustified"] += 1
+        
+        summary_data = [['Classe', 'Justifiées', 'Non justifiées', 'Total']]
+        total_j = 0
+        total_nj = 0
+        for class_name, counts in sorted(class_counts.items()):
+            summary_data.append([
+                class_name,
+                str(counts["justified"]),
+                str(counts["unjustified"]),
+                str(counts["justified"] + counts["unjustified"])
+            ])
+            total_j += counts["justified"]
+            total_nj += counts["unjustified"]
+        
+        summary_data.append(['TOTAL', str(total_j), str(total_nj), str(total_j + total_nj)])
+        
+        summary_table = Table(summary_data, colWidths=[40*mm, 35*mm, 40*mm, 30*mm])
+        summary_table.setStyle(TableStyle([
+            ('BACKGROUND', (0, 0), (-1, 0), colors.HexColor('#374151')),
+            ('BACKGROUND', (0, -1), (-1, -1), colors.HexColor('#374151')),
+            ('TEXTCOLOR', (0, 0), (-1, 0), colors.white),
+            ('TEXTCOLOR', (0, -1), (-1, -1), colors.white),
+            ('ALIGN', (0, 0), (-1, -1), 'CENTER'),
+            ('FONTNAME', (0, 0), (-1, 0), 'Helvetica-Bold'),
+            ('FONTNAME', (0, -1), (-1, -1), 'Helvetica-Bold'),
+            ('FONTSIZE', (0, 0), (-1, -1), 10),
+            ('GRID', (0, 0), (-1, -1), 0.5, colors.HexColor('#D1D5DB')),
+            ('VALIGN', (0, 0), (-1, -1), 'MIDDLE'),
+            ('TOPPADDING', (0, 0), (-1, -1), 8),
+            ('BOTTOMPADDING', (0, 0), (-1, -1), 8),
+        ]))
+        elements.append(summary_table)
+    else:
+        elements.append(Paragraph("Aucun absent ce jour.", styles['Normal']))
+    
+    # Signature
+    elements.append(Spacer(1, 30))
+    sig_data = [['Signature du responsable:', '', 'Date:', date]]
+    sig_table = Table(sig_data, colWidths=[50*mm, 50*mm, 25*mm, 40*mm])
+    sig_table.setStyle(TableStyle([
+        ('ALIGN', (0, 0), (-1, -1), 'LEFT'),
+        ('FONTSIZE', (0, 0), (-1, -1), 10),
+    ]))
+    elements.append(sig_table)
+    
+    doc.build(elements)
+    buffer.seek(0)
+    
+    return {
+        "filename": f"tous_absents_{date}.pdf",
+        "content": base64.b64encode(buffer.getvalue()).decode('utf-8'),
+        "content_type": "application/pdf"
+    }
+
+
 @api_router.get("/export/students/excel")
 async def export_students_excel(class_id: Optional[str] = None):
     """Export students list to Excel format"""
