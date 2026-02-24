@@ -524,6 +524,372 @@ async def get_statistics():
         top_absent_students=top_absent_students
     )
 
+# ==================== EXPORT ENDPOINTS ====================
+
+@api_router.get("/export/absences/excel")
+async def export_absences_excel(
+    class_id: Optional[str] = None,
+    start_date: Optional[str] = None,
+    end_date: Optional[str] = None,
+    type: Optional[str] = None
+):
+    """Export absences to Excel format"""
+    # Get absences data
+    query = {}
+    if type:
+        query["type"] = type
+    if start_date:
+        query["date"] = {"$gte": start_date}
+    if end_date:
+        if "date" in query:
+            query["date"]["$lte"] = end_date
+        else:
+            query["date"] = {"$lte": end_date}
+    
+    absences = await db.absences.find(query).sort("date", -1).to_list(5000)
+    
+    # Create Excel file in memory
+    output = io.BytesIO()
+    workbook = xlsxwriter.Workbook(output, {'in_memory': True})
+    
+    # Styles
+    header_format = workbook.add_format({
+        'bold': True,
+        'bg_color': '#3B82F6',
+        'font_color': 'white',
+        'border': 1,
+        'align': 'center',
+        'valign': 'vcenter'
+    })
+    cell_format = workbook.add_format({
+        'border': 1,
+        'align': 'left',
+        'valign': 'vcenter'
+    })
+    justified_format = workbook.add_format({
+        'border': 1,
+        'bg_color': '#D1FAE5',
+        'align': 'center'
+    })
+    unjustified_format = workbook.add_format({
+        'border': 1,
+        'bg_color': '#FEE2E2',
+        'align': 'center'
+    })
+    
+    # Sheet 1: Liste des absences
+    ws_absences = workbook.add_worksheet('Absences')
+    headers = ['Date', 'Élève', 'Classe', 'Type', 'Motif', 'Notifié']
+    for col, header in enumerate(headers):
+        ws_absences.write(0, col, header, header_format)
+    
+    ws_absences.set_column(0, 0, 12)  # Date
+    ws_absences.set_column(1, 1, 25)  # Élève
+    ws_absences.set_column(2, 2, 15)  # Classe
+    ws_absences.set_column(3, 3, 15)  # Type
+    ws_absences.set_column(4, 4, 35)  # Motif
+    ws_absences.set_column(5, 5, 10)  # Notifié
+    
+    row = 1
+    for absence in absences:
+        student = await db.students.find_one({"_id": ObjectId(absence["student_id"])})
+        if student:
+            if class_id and student["class_id"] != class_id:
+                continue
+            cls = await db.classes.find_one({"_id": ObjectId(student["class_id"])})
+            class_name = cls["name"] if cls else "Inconnu"
+            student_name = f"{student['first_name']} {student['last_name']}"
+            
+            ws_absences.write(row, 0, absence.get("date", ""), cell_format)
+            ws_absences.write(row, 1, student_name, cell_format)
+            ws_absences.write(row, 2, class_name, cell_format)
+            
+            type_format = justified_format if absence.get("type") == "justifiée" else unjustified_format
+            ws_absences.write(row, 3, "Justifiée" if absence.get("type") == "justifiée" else "Non justifiée", type_format)
+            
+            ws_absences.write(row, 4, absence.get("reason", ""), cell_format)
+            ws_absences.write(row, 5, "Oui" if absence.get("notified") else "Non", cell_format)
+            row += 1
+    
+    # Sheet 2: Statistiques par classe
+    ws_stats = workbook.add_worksheet('Statistiques')
+    classes = await db.classes.find().to_list(100)
+    
+    ws_stats.write(0, 0, 'Classe', header_format)
+    ws_stats.write(0, 1, 'Nombre d\'élèves', header_format)
+    ws_stats.write(0, 2, 'Total absences', header_format)
+    ws_stats.write(0, 3, 'Justifiées', header_format)
+    ws_stats.write(0, 4, 'Non justifiées', header_format)
+    
+    ws_stats.set_column(0, 0, 15)
+    ws_stats.set_column(1, 4, 18)
+    
+    row = 1
+    for cls in classes:
+        class_id_str = str(cls["_id"])
+        students = await db.students.find({"class_id": class_id_str}).to_list(500)
+        student_ids = [str(s["_id"]) for s in students]
+        
+        total_abs = await db.absences.count_documents({"student_id": {"$in": student_ids}})
+        justified = await db.absences.count_documents({"student_id": {"$in": student_ids}, "type": "justifiée"})
+        unjustified = await db.absences.count_documents({"student_id": {"$in": student_ids}, "type": "non_justifiée"})
+        
+        ws_stats.write(row, 0, cls["name"], cell_format)
+        ws_stats.write(row, 1, len(students), cell_format)
+        ws_stats.write(row, 2, total_abs, cell_format)
+        ws_stats.write(row, 3, justified, justified_format)
+        ws_stats.write(row, 4, unjustified, unjustified_format)
+        row += 1
+    
+    # Sheet 3: Top élèves absents
+    ws_top = workbook.add_worksheet('Top Absents')
+    ws_top.write(0, 0, 'Rang', header_format)
+    ws_top.write(0, 1, 'Élève', header_format)
+    ws_top.write(0, 2, 'Classe', header_format)
+    ws_top.write(0, 3, 'Nombre d\'absences', header_format)
+    
+    ws_top.set_column(0, 0, 8)
+    ws_top.set_column(1, 1, 25)
+    ws_top.set_column(2, 2, 15)
+    ws_top.set_column(3, 3, 20)
+    
+    pipeline = [
+        {"$group": {"_id": "$student_id", "count": {"$sum": 1}}},
+        {"$sort": {"count": -1}},
+        {"$limit": 20}
+    ]
+    top_absences = await db.absences.aggregate(pipeline).to_list(20)
+    
+    row = 1
+    for idx, item in enumerate(top_absences):
+        student = await db.students.find_one({"_id": ObjectId(item["_id"])})
+        if student:
+            cls = await db.classes.find_one({"_id": ObjectId(student["class_id"])})
+            class_name = cls["name"] if cls else "Inconnu"
+            
+            ws_top.write(row, 0, idx + 1, cell_format)
+            ws_top.write(row, 1, f"{student['first_name']} {student['last_name']}", cell_format)
+            ws_top.write(row, 2, class_name, cell_format)
+            ws_top.write(row, 3, item["count"], unjustified_format if item["count"] > 5 else cell_format)
+            row += 1
+    
+    workbook.close()
+    output.seek(0)
+    
+    # Return as base64 for mobile download
+    excel_base64 = base64.b64encode(output.getvalue()).decode('utf-8')
+    
+    return {
+        "filename": f"absences_{datetime.now().strftime('%Y%m%d_%H%M%S')}.xlsx",
+        "content": excel_base64,
+        "content_type": "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+    }
+
+
+@api_router.get("/export/absences/pdf")
+async def export_absences_pdf(
+    class_id: Optional[str] = None,
+    start_date: Optional[str] = None,
+    end_date: Optional[str] = None,
+    type: Optional[str] = None
+):
+    """Export absences to PDF format"""
+    # Get absences data
+    query = {}
+    if type:
+        query["type"] = type
+    if start_date:
+        query["date"] = {"$gte": start_date}
+    if end_date:
+        if "date" in query:
+            query["date"]["$lte"] = end_date
+        else:
+            query["date"] = {"$lte": end_date}
+    
+    absences = await db.absences.find(query).sort("date", -1).to_list(5000)
+    
+    # Create PDF in memory
+    buffer = io.BytesIO()
+    doc = SimpleDocTemplate(
+        buffer,
+        pagesize=A4,
+        rightMargin=20*mm,
+        leftMargin=20*mm,
+        topMargin=20*mm,
+        bottomMargin=20*mm
+    )
+    
+    elements = []
+    styles = getSampleStyleSheet()
+    
+    # Title
+    title_style = ParagraphStyle(
+        'CustomTitle',
+        parent=styles['Heading1'],
+        fontSize=18,
+        spaceAfter=20,
+        textColor=colors.HexColor('#3B82F6'),
+        alignment=1  # Center
+    )
+    elements.append(Paragraph("Rapport des Absences Scolaires", title_style))
+    elements.append(Paragraph(f"Généré le {datetime.now().strftime('%d/%m/%Y à %H:%M')}", styles['Normal']))
+    elements.append(Spacer(1, 20))
+    
+    # Statistics summary
+    total_absences = await db.absences.count_documents(query if query else {})
+    justified = await db.absences.count_documents({**query, "type": "justifiée"} if query else {"type": "justifiée"})
+    unjustified = await db.absences.count_documents({**query, "type": "non_justifiée"} if query else {"type": "non_justifiée"})
+    
+    summary_data = [
+        ["Statistiques Globales", ""],
+        ["Total des absences", str(total_absences)],
+        ["Absences justifiées", str(justified)],
+        ["Absences non justifiées", str(unjustified)],
+    ]
+    
+    summary_table = Table(summary_data, colWidths=[120*mm, 40*mm])
+    summary_table.setStyle(TableStyle([
+        ('BACKGROUND', (0, 0), (-1, 0), colors.HexColor('#3B82F6')),
+        ('TEXTCOLOR', (0, 0), (-1, 0), colors.white),
+        ('ALIGN', (0, 0), (-1, -1), 'LEFT'),
+        ('FONTNAME', (0, 0), (-1, 0), 'Helvetica-Bold'),
+        ('FONTSIZE', (0, 0), (-1, -1), 10),
+        ('BOTTOMPADDING', (0, 0), (-1, 0), 12),
+        ('BACKGROUND', (0, 1), (-1, -1), colors.HexColor('#F3F4F6')),
+        ('GRID', (0, 0), (-1, -1), 1, colors.HexColor('#E5E7EB')),
+        ('VALIGN', (0, 0), (-1, -1), 'MIDDLE'),
+        ('LEFTPADDING', (0, 0), (-1, -1), 10),
+        ('RIGHTPADDING', (0, 0), (-1, -1), 10),
+        ('TOPPADDING', (0, 0), (-1, -1), 8),
+        ('BOTTOMPADDING', (0, 0), (-1, -1), 8),
+    ]))
+    elements.append(summary_table)
+    elements.append(Spacer(1, 20))
+    
+    # Absences table
+    elements.append(Paragraph("Liste des Absences", styles['Heading2']))
+    elements.append(Spacer(1, 10))
+    
+    table_data = [['Date', 'Élève', 'Classe', 'Type', 'Motif']]
+    
+    for absence in absences[:100]:  # Limit to 100 for PDF
+        student = await db.students.find_one({"_id": ObjectId(absence["student_id"])})
+        if student:
+            if class_id and student["class_id"] != class_id:
+                continue
+            cls = await db.classes.find_one({"_id": ObjectId(student["class_id"])})
+            class_name = cls["name"] if cls else "Inconnu"
+            student_name = f"{student['first_name']} {student['last_name']}"
+            
+            table_data.append([
+                absence.get("date", ""),
+                student_name,
+                class_name,
+                "Justifiée" if absence.get("type") == "justifiée" else "Non justifiée",
+                (absence.get("reason", "") or "")[:30]  # Truncate reason
+            ])
+    
+    if len(table_data) > 1:
+        absences_table = Table(table_data, colWidths=[25*mm, 45*mm, 30*mm, 30*mm, 40*mm])
+        absences_table.setStyle(TableStyle([
+            ('BACKGROUND', (0, 0), (-1, 0), colors.HexColor('#3B82F6')),
+            ('TEXTCOLOR', (0, 0), (-1, 0), colors.white),
+            ('ALIGN', (0, 0), (-1, -1), 'LEFT'),
+            ('FONTNAME', (0, 0), (-1, 0), 'Helvetica-Bold'),
+            ('FONTSIZE', (0, 0), (-1, -1), 9),
+            ('BOTTOMPADDING', (0, 0), (-1, 0), 10),
+            ('BACKGROUND', (0, 1), (-1, -1), colors.white),
+            ('GRID', (0, 0), (-1, -1), 0.5, colors.HexColor('#E5E7EB')),
+            ('VALIGN', (0, 0), (-1, -1), 'MIDDLE'),
+            ('LEFTPADDING', (0, 0), (-1, -1), 5),
+            ('RIGHTPADDING', (0, 0), (-1, -1), 5),
+            ('TOPPADDING', (0, 0), (-1, -1), 6),
+            ('BOTTOMPADDING', (0, 0), (-1, -1), 6),
+            ('ROWBACKGROUNDS', (0, 1), (-1, -1), [colors.white, colors.HexColor('#F9FAFB')]),
+        ]))
+        elements.append(absences_table)
+    else:
+        elements.append(Paragraph("Aucune absence trouvée.", styles['Normal']))
+    
+    # Build PDF
+    doc.build(elements)
+    buffer.seek(0)
+    
+    # Return as base64 for mobile download
+    pdf_base64 = base64.b64encode(buffer.getvalue()).decode('utf-8')
+    
+    return {
+        "filename": f"absences_{datetime.now().strftime('%Y%m%d_%H%M%S')}.pdf",
+        "content": pdf_base64,
+        "content_type": "application/pdf"
+    }
+
+
+@api_router.get("/export/students/excel")
+async def export_students_excel(class_id: Optional[str] = None):
+    """Export students list to Excel format"""
+    query = {}
+    if class_id:
+        query["class_id"] = class_id
+    
+    students = await db.students.find(query).to_list(1000)
+    
+    output = io.BytesIO()
+    workbook = xlsxwriter.Workbook(output, {'in_memory': True})
+    
+    header_format = workbook.add_format({
+        'bold': True,
+        'bg_color': '#3B82F6',
+        'font_color': 'white',
+        'border': 1,
+        'align': 'center',
+        'valign': 'vcenter'
+    })
+    cell_format = workbook.add_format({
+        'border': 1,
+        'align': 'left',
+        'valign': 'vcenter'
+    })
+    
+    ws = workbook.add_worksheet('Élèves')
+    headers = ['Prénom', 'Nom', 'Classe', 'Email Parent', 'Téléphone Parent', 'Date Naissance', 'Nb Absences']
+    
+    for col, header in enumerate(headers):
+        ws.write(0, col, header, header_format)
+    
+    ws.set_column(0, 1, 20)
+    ws.set_column(2, 2, 15)
+    ws.set_column(3, 3, 30)
+    ws.set_column(4, 4, 18)
+    ws.set_column(5, 5, 15)
+    ws.set_column(6, 6, 12)
+    
+    row = 1
+    for student in students:
+        cls = await db.classes.find_one({"_id": ObjectId(student["class_id"])})
+        class_name = cls["name"] if cls else "Inconnu"
+        absence_count = await db.absences.count_documents({"student_id": str(student["_id"])})
+        
+        ws.write(row, 0, student.get("first_name", ""), cell_format)
+        ws.write(row, 1, student.get("last_name", ""), cell_format)
+        ws.write(row, 2, class_name, cell_format)
+        ws.write(row, 3, student.get("parent_email", "") or "", cell_format)
+        ws.write(row, 4, student.get("parent_phone", "") or "", cell_format)
+        ws.write(row, 5, student.get("birth_date", "") or "", cell_format)
+        ws.write(row, 6, absence_count, cell_format)
+        row += 1
+    
+    workbook.close()
+    output.seek(0)
+    
+    excel_base64 = base64.b64encode(output.getvalue()).decode('utf-8')
+    
+    return {
+        "filename": f"eleves_{datetime.now().strftime('%Y%m%d_%H%M%S')}.xlsx",
+        "content": excel_base64,
+        "content_type": "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+    }
+
 # Include the router in the main app
 app.include_router(api_router)
 
