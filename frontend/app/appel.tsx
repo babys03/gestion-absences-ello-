@@ -271,6 +271,62 @@ export default function AppelScreen() {
     }
   };
 
+  const exportAllAbsents = async (type: 'pdf' | 'excel') => {
+    setExporting(true);
+    try {
+      const dateStr = format(selectedDate, 'yyyy-MM-dd');
+      const url = `${API_URL}/api/export/all-absents/${type}?date=${dateStr}`;
+
+      const response = await fetch(url);
+      
+      if (!response.ok) {
+        throw new Error('Erreur lors de la génération');
+      }
+
+      const data = await response.json();
+      
+      if (Platform.OS === 'web') {
+        const byteCharacters = atob(data.content);
+        const byteNumbers = new Array(byteCharacters.length);
+        for (let i = 0; i < byteCharacters.length; i++) {
+          byteNumbers[i] = byteCharacters.charCodeAt(i);
+        }
+        const byteArray = new Uint8Array(byteNumbers);
+        const blob = new Blob([byteArray], { type: data.content_type });
+        const downloadUrl = window.URL.createObjectURL(blob);
+        const link = document.createElement('a');
+        link.href = downloadUrl;
+        link.download = data.filename;
+        document.body.appendChild(link);
+        link.click();
+        document.body.removeChild(link);
+        window.URL.revokeObjectURL(downloadUrl);
+        
+        Alert.alert('Succès', `Fichier téléchargé: ${data.filename}`);
+      } else {
+        const fileUri = FileSystem.documentDirectory + data.filename;
+        await FileSystem.writeAsStringAsync(fileUri, data.content, {
+          encoding: FileSystem.EncodingType.Base64,
+        });
+        
+        const canShare = await Sharing.isAvailableAsync();
+        if (canShare) {
+          await Sharing.shareAsync(fileUri, {
+            mimeType: data.content_type,
+            dialogTitle: `Partager ${data.filename}`,
+          });
+        } else {
+          Alert.alert('Succès', `Fichier sauvegardé: ${data.filename}`);
+        }
+      }
+    } catch (error) {
+      console.error('Export all absents error:', error);
+      Alert.alert('Erreur', 'Impossible de générer le fichier');
+    } finally {
+      setExporting(false);
+    }
+  };
+
   const filteredStudents = students.filter(s => 
     !selectedClass || s.class_id === selectedClass
   );
