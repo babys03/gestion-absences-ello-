@@ -140,7 +140,8 @@ async def create_class(class_data: ClassCreate):
     
     result = await db.classes.insert_one(class_dict)
     class_dict["id"] = str(result.inserted_id)
-    del class_dict["_id"] if "_id" in class_dict else None
+    if "_id" in class_dict:
+        del class_dict["_id"]
     return ClassResponse(**class_dict)
 
 @api_router.get("/classes", response_model=List[ClassResponse])
