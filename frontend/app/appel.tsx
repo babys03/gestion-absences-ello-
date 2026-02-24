@@ -414,7 +414,7 @@ export default function AppelScreen() {
 
       {/* Export Buttons */}
       <View style={styles.exportBar}>
-        <Text style={styles.exportLabel}>Exporter la feuille:</Text>
+        <Text style={styles.exportLabel}>Exporter cette classe:</Text>
         <View style={styles.exportButtons}>
           <TouchableOpacity
             style={[styles.exportBtn, styles.exportBtnExcel]}
@@ -440,6 +440,41 @@ export default function AppelScreen() {
             ) : (
               <>
                 <Ionicons name="print" size={16} color="#FFFFFF" />
+                <Text style={styles.exportBtnText}>PDF</Text>
+              </>
+            )}
+          </TouchableOpacity>
+        </View>
+      </View>
+
+      {/* Export All Absents */}
+      <View style={styles.exportAllBar}>
+        <Text style={styles.exportAllLabel}>Récap. tous les absents:</Text>
+        <View style={styles.exportButtons}>
+          <TouchableOpacity
+            style={[styles.exportBtn, styles.exportBtnAllExcel]}
+            onPress={() => exportAllAbsents('excel')}
+            disabled={exporting}
+          >
+            {exporting ? (
+              <ActivityIndicator size="small" color="#FFFFFF" />
+            ) : (
+              <>
+                <Ionicons name="list" size={16} color="#FFFFFF" />
+                <Text style={styles.exportBtnText}>Excel</Text>
+              </>
+            )}
+          </TouchableOpacity>
+          <TouchableOpacity
+            style={[styles.exportBtn, styles.exportBtnAllPdf]}
+            onPress={() => exportAllAbsents('pdf')}
+            disabled={exporting}
+          >
+            {exporting ? (
+              <ActivityIndicator size="small" color="#FFFFFF" />
+            ) : (
+              <>
+                <Ionicons name="document" size={16} color="#FFFFFF" />
                 <Text style={styles.exportBtnText}>PDF</Text>
               </>
             )}
