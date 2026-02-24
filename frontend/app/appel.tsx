@@ -10,11 +10,14 @@ import {
   ActivityIndicator,
   TextInput,
   ScrollView,
+  Platform,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons'
 import { useFocusEffect } from 'expo-router';
 import { format, addDays, subDays } from 'date-fns';
 import { fr } from 'date-fns/locale';
+import * as FileSystem from 'expo-file-system';
+import * as Sharing from 'expo-sharing';
 
 const API_URL = process.env.EXPO_PUBLIC_BACKEND_URL;
 
