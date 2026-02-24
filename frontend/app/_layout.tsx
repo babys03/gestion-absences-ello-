@@ -19,9 +19,19 @@ export default function TabLayout() {
       <Tabs.Screen
         name="index"
         options={{
-          title: 'Tableau de bord',
+          title: 'Accueil',
           tabBarIcon: ({ color, size }) => (
             <Ionicons name="home" size={size} color={color} />
+          ),
+        }}
+      />
+      <Tabs.Screen
+        name="appel"
+        options={{
+          title: 'Appel',
+          headerTitle: 'Faire l\'appel',
+          tabBarIcon: ({ color, size }) => (
+            <Ionicons name="checkbox" size={size} color={color} />
           ),
         }}
       />
@@ -46,7 +56,8 @@ export default function TabLayout() {
       <Tabs.Screen
         name="absences"
         options={{
-          title: 'Absences',
+          title: 'Historique',
+          headerTitle: 'Historique des absences',
           tabBarIcon: ({ color, size }) => (
             <Ionicons name="calendar" size={size} color={color} />
           ),
@@ -59,6 +70,7 @@ export default function TabLayout() {
           tabBarIcon: ({ color, size }) => (
             <Ionicons name="stats-chart" size={size} color={color} />
           ),
+          href: null, // Hide from tabs but keep accessible
         }}
       />
       <Tabs.Screen
@@ -68,6 +80,7 @@ export default function TabLayout() {
           tabBarIcon: ({ color, size }) => (
             <Ionicons name="download" size={size} color={color} />
           ),
+          href: null, // Hide from tabs but keep accessible
         }}
       />
     </Tabs>
