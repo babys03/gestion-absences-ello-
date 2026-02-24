@@ -8,7 +8,6 @@ import {
   Alert,
   RefreshControl,
   ActivityIndicator,
-  TextInput,
   ScrollView,
   Platform,
 } from 'react-native';
@@ -43,10 +42,7 @@ interface AbsenceRecord {
   apresmidi: boolean;
   type_matin: string;
   type_apresmidi: string;
-  reason?: string;
 }
-
-type Period = 'matin' | 'apresmidi';
 
 export default function AppelScreen() {
   const [students, setStudents] = useState<Student[]>([]);
@@ -69,7 +65,6 @@ export default function AppelScreen() {
       if (classesRes.ok) {
         const classesData = await classesRes.json();
         setClasses(classesData);
-        // Select first class by default if none selected
         if (!selectedClass && classesData.length > 0) {
           setSelectedClass(classesData[0].id);
         }
@@ -80,7 +75,6 @@ export default function AppelScreen() {
         setStudents(studentsData);
       }
 
-      // Fetch existing absences for the selected date
       await fetchAbsencesForDate();
     } catch (error) {
       console.error('Erreur:', error);
@@ -100,13 +94,28 @@ export default function AppelScreen() {
         const absenceMap = new Map<string, AbsenceRecord>();
         
         data.forEach((absence: any) => {
-          absenceMap.set(absence.student_id, {
+          const existing = absenceMap.get(absence.student_id) || {
             student_id: absence.student_id,
-            absence_id: absence.id,
-            is_absent: true,
-            type: absence.type,
-            reason: absence.reason,
-          });
+            matin: false,
+            apresmidi: false,
+            type_matin: 'non_justifiée',
+            type_apresmidi: 'non_justifiée',
+          };
+          
+          const period = absence.period || 'journee';
+          
+          if (period === 'matin' || period === 'journee') {
+            existing.matin = true;
+            existing.absence_id_matin = absence.id;
+            existing.type_matin = absence.type;
+          }
+          if (period === 'apresmidi' || period === 'journee') {
+            existing.apresmidi = true;
+            existing.absence_id_apresmidi = absence.id;
+            existing.type_apresmidi = absence.type;
+          }
+          
+          absenceMap.set(absence.student_id, existing);
         });
         
         setAbsences(absenceMap);
@@ -122,7 +131,6 @@ export default function AppelScreen() {
     }, [selectedClass])
   );
 
-  // Refetch absences when date changes
   React.useEffect(() => {
     fetchAbsencesForDate();
   }, [selectedDate]);
@@ -136,21 +144,42 @@ export default function AppelScreen() {
     setSelectedDate(prev => days > 0 ? addDays(prev, days) : subDays(prev, Math.abs(days)));
   };
 
-  const toggleAbsence = async (student: Student) => {
-    const currentRecord = absences.get(student.id);
-    const isCurrentlyAbsent = currentRecord?.is_absent || false;
+  const toggleAbsence = async (student: Student, period: 'matin' | 'apresmidi') => {
+    const currentRecord = absences.get(student.id) || {
+      student_id: student.id,
+      matin: false,
+      apresmidi: false,
+      type_matin: 'non_justifiée',
+      type_apresmidi: 'non_justifiée',
+    };
+    
+    const isCurrentlyAbsent = period === 'matin' ? currentRecord.matin : currentRecord.apresmidi;
+    const absenceId = period === 'matin' ? currentRecord.absence_id_matin : currentRecord.absence_id_apresmidi;
 
     setSaving(true);
     try {
-      if (isCurrentlyAbsent && currentRecord?.absence_id) {
+      if (isCurrentlyAbsent && absenceId) {
         // Remove absence
-        const response = await fetch(`${API_URL}/api/absences/${currentRecord.absence_id}`, {
+        const response = await fetch(`${API_URL}/api/absences/${absenceId}`, {
           method: 'DELETE',
         });
         
         if (response.ok) {
           const newAbsences = new Map(absences);
-          newAbsences.delete(student.id);
+          const updated = { ...currentRecord };
+          if (period === 'matin') {
+            updated.matin = false;
+            updated.absence_id_matin = undefined;
+          } else {
+            updated.apresmidi = false;
+            updated.absence_id_apresmidi = undefined;
+          }
+          
+          if (!updated.matin && !updated.apresmidi) {
+            newAbsences.delete(student.id);
+          } else {
+            newAbsences.set(student.id, updated);
+          }
           setAbsences(newAbsences);
         }
       } else {
@@ -161,6 +190,7 @@ export default function AppelScreen() {
           body: JSON.stringify({
             student_id: student.id,
             date: format(selectedDate, 'yyyy-MM-dd'),
+            period: period,
             type: 'non_justifiée',
             notify_parent: true,
           }),
@@ -169,12 +199,17 @@ export default function AppelScreen() {
         if (response.ok) {
           const data = await response.json();
           const newAbsences = new Map(absences);
-          newAbsences.set(student.id, {
-            student_id: student.id,
-            absence_id: data.id,
-            is_absent: true,
-            type: 'non_justifiée',
-          });
+          const updated = { ...currentRecord };
+          if (period === 'matin') {
+            updated.matin = true;
+            updated.absence_id_matin = data.id;
+            updated.type_matin = 'non_justifiée';
+          } else {
+            updated.apresmidi = true;
+            updated.absence_id_apresmidi = data.id;
+            updated.type_apresmidi = 'non_justifiée';
+          }
+          newAbsences.set(student.id, updated);
           setAbsences(newAbsences);
         }
       }
@@ -185,14 +220,18 @@ export default function AppelScreen() {
     }
   };
 
-  const toggleAbsenceType = async (student: Student) => {
+  const toggleAbsenceType = async (student: Student, period: 'matin' | 'apresmidi') => {
     const currentRecord = absences.get(student.id);
-    if (!currentRecord?.absence_id) return;
-
-    const newType = currentRecord.type === 'justifiée' ? 'non_justifiée' : 'justifiée';
+    if (!currentRecord) return;
+    
+    const absenceId = period === 'matin' ? currentRecord.absence_id_matin : currentRecord.absence_id_apresmidi;
+    if (!absenceId) return;
+    
+    const currentType = period === 'matin' ? currentRecord.type_matin : currentRecord.type_apresmidi;
+    const newType = currentType === 'justifiée' ? 'non_justifiée' : 'justifiée';
 
     try {
-      const response = await fetch(`${API_URL}/api/absences/${currentRecord.absence_id}`, {
+      const response = await fetch(`${API_URL}/api/absences/${absenceId}`, {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ type: newType }),
@@ -200,10 +239,13 @@ export default function AppelScreen() {
 
       if (response.ok) {
         const newAbsences = new Map(absences);
-        newAbsences.set(student.id, {
-          ...currentRecord,
-          type: newType,
-        });
+        const updated = { ...currentRecord };
+        if (period === 'matin') {
+          updated.type_matin = newType;
+        } else {
+          updated.type_apresmidi = newType;
+        }
+        newAbsences.set(student.id, updated);
         setAbsences(newAbsences);
       }
     } catch (error) {
@@ -211,8 +253,14 @@ export default function AppelScreen() {
     }
   };
 
-  const getAbsentCount = () => {
-    return Array.from(absences.values()).filter(a => a.is_absent).length;
+  const getAbsentCount = (period: 'matin' | 'apresmidi' | 'total') => {
+    let count = 0;
+    absences.forEach((record) => {
+      if (period === 'matin' && record.matin) count++;
+      else if (period === 'apresmidi' && record.apresmidi) count++;
+      else if (period === 'total' && (record.matin || record.apresmidi)) count++;
+    });
+    return count;
   };
 
   const exportAttendance = async (type: 'pdf' | 'excel') => {
@@ -225,15 +273,11 @@ export default function AppelScreen() {
       }
 
       const response = await fetch(url);
-      
-      if (!response.ok) {
-        throw new Error('Erreur lors de la génération');
-      }
+      if (!response.ok) throw new Error('Erreur');
 
       const data = await response.json();
       
       if (Platform.OS === 'web') {
-        // Web download
         const byteCharacters = atob(data.content);
         const byteNumbers = new Array(byteCharacters.length);
         for (let i = 0; i < byteCharacters.length; i++) {
@@ -249,27 +293,18 @@ export default function AppelScreen() {
         link.click();
         document.body.removeChild(link);
         window.URL.revokeObjectURL(downloadUrl);
-        
         Alert.alert('Succès', `Fichier téléchargé: ${data.filename}`);
       } else {
-        // Mobile download
         const fileUri = FileSystem.documentDirectory + data.filename;
         await FileSystem.writeAsStringAsync(fileUri, data.content, {
           encoding: FileSystem.EncodingType.Base64,
         });
-        
         const canShare = await Sharing.isAvailableAsync();
         if (canShare) {
-          await Sharing.shareAsync(fileUri, {
-            mimeType: data.content_type,
-            dialogTitle: `Partager ${data.filename}`,
-          });
-        } else {
-          Alert.alert('Succès', `Fichier sauvegardé: ${data.filename}`);
+          await Sharing.shareAsync(fileUri, { mimeType: data.content_type });
         }
       }
     } catch (error) {
-      console.error('Export error:', error);
       Alert.alert('Erreur', 'Impossible de générer le fichier');
     } finally {
       setExporting(false);
@@ -283,10 +318,7 @@ export default function AppelScreen() {
       const url = `${API_URL}/api/export/all-absents/${type}?date=${dateStr}`;
 
       const response = await fetch(url);
-      
-      if (!response.ok) {
-        throw new Error('Erreur lors de la génération');
-      }
+      if (!response.ok) throw new Error('Erreur');
 
       const data = await response.json();
       
@@ -306,26 +338,18 @@ export default function AppelScreen() {
         link.click();
         document.body.removeChild(link);
         window.URL.revokeObjectURL(downloadUrl);
-        
         Alert.alert('Succès', `Fichier téléchargé: ${data.filename}`);
       } else {
         const fileUri = FileSystem.documentDirectory + data.filename;
         await FileSystem.writeAsStringAsync(fileUri, data.content, {
           encoding: FileSystem.EncodingType.Base64,
         });
-        
         const canShare = await Sharing.isAvailableAsync();
         if (canShare) {
-          await Sharing.shareAsync(fileUri, {
-            mimeType: data.content_type,
-            dialogTitle: `Partager ${data.filename}`,
-          });
-        } else {
-          Alert.alert('Succès', `Fichier sauvegardé: ${data.filename}`);
+          await Sharing.shareAsync(fileUri, { mimeType: data.content_type });
         }
       }
     } catch (error) {
-      console.error('Export all absents error:', error);
       Alert.alert('Erreur', 'Impossible de générer le fichier');
     } finally {
       setExporting(false);
@@ -338,53 +362,71 @@ export default function AppelScreen() {
 
   const renderStudentItem = ({ item }: { item: Student }) => {
     const record = absences.get(item.id);
-    const isAbsent = record?.is_absent || false;
-    const isJustified = record?.type === 'justifiée';
+    const matinAbsent = record?.matin || false;
+    const apresmidiAbsent = record?.apresmidi || false;
+    const matinJustified = record?.type_matin === 'justifiée';
+    const apresmidiJustified = record?.type_apresmidi === 'justifiée';
 
     return (
       <View style={styles.studentRow}>
-        <TouchableOpacity
-          style={styles.studentInfo}
-          onPress={() => toggleAbsence(item)}
-          activeOpacity={0.7}
-        >
-          <View style={[
-            styles.checkbox,
-            isAbsent && styles.checkboxChecked,
-            isAbsent && isJustified && styles.checkboxJustified,
+        <View style={styles.studentInfo}>
+          <Text style={[
+            styles.studentName,
+            (matinAbsent && apresmidiAbsent) && styles.studentNameAbsent,
           ]}>
-            {isAbsent && (
-              <Ionicons 
-                name="close" 
-                size={20} 
-                color="#FFFFFF" 
-              />
-            )}
-          </View>
-          <View style={styles.studentDetails}>
-            <Text style={[
-              styles.studentName,
-              isAbsent && styles.studentNameAbsent,
-            ]}>
-              {item.first_name} {item.last_name}
-            </Text>
-            <Text style={styles.studentClass}>{item.class_name}</Text>
-          </View>
-        </TouchableOpacity>
+            {item.first_name} {item.last_name}
+          </Text>
+        </View>
 
-        {isAbsent && (
+        {/* Matin */}
+        <View style={styles.periodColumn}>
           <TouchableOpacity
             style={[
-              styles.typeButton,
-              isJustified ? styles.typeButtonJustified : styles.typeButtonUnjustified,
+              styles.periodCheckbox,
+              matinAbsent && styles.periodCheckboxAbsent,
+              matinAbsent && matinJustified && styles.periodCheckboxJustified,
             ]}
-            onPress={() => toggleAbsenceType(item)}
+            onPress={() => toggleAbsence(item, 'matin')}
           >
-            <Text style={styles.typeButtonText}>
-              {isJustified ? 'J' : 'NJ'}
-            </Text>
+            {matinAbsent && <Ionicons name="close" size={16} color="#FFFFFF" />}
           </TouchableOpacity>
-        )}
+          {matinAbsent && (
+            <TouchableOpacity
+              style={[
+                styles.typeTag,
+                matinJustified ? styles.typeTagJ : styles.typeTagNJ,
+              ]}
+              onPress={() => toggleAbsenceType(item, 'matin')}
+            >
+              <Text style={styles.typeTagText}>{matinJustified ? 'J' : 'NJ'}</Text>
+            </TouchableOpacity>
+          )}
+        </View>
+
+        {/* Après-midi */}
+        <View style={styles.periodColumn}>
+          <TouchableOpacity
+            style={[
+              styles.periodCheckbox,
+              apresmidiAbsent && styles.periodCheckboxAbsent,
+              apresmidiAbsent && apresmidiJustified && styles.periodCheckboxJustified,
+            ]}
+            onPress={() => toggleAbsence(item, 'apresmidi')}
+          >
+            {apresmidiAbsent && <Ionicons name="close" size={16} color="#FFFFFF" />}
+          </TouchableOpacity>
+          {apresmidiAbsent && (
+            <TouchableOpacity
+              style={[
+                styles.typeTag,
+                apresmidiJustified ? styles.typeTagJ : styles.typeTagNJ,
+              ]}
+              onPress={() => toggleAbsenceType(item, 'apresmidi')}
+            >
+              <Text style={styles.typeTagText}>{apresmidiJustified ? 'J' : 'NJ'}</Text>
+            </TouchableOpacity>
+          )}
+        </View>
       </View>
     );
   };
@@ -402,27 +444,18 @@ export default function AppelScreen() {
     <View style={styles.container}>
       {/* Date Selector */}
       <View style={styles.dateSelector}>
-        <TouchableOpacity
-          style={styles.dateArrow}
-          onPress={() => changeDate(-1)}
-        >
+        <TouchableOpacity style={styles.dateArrow} onPress={() => changeDate(-1)}>
           <Ionicons name="chevron-back" size={28} color="#3B82F6" />
         </TouchableOpacity>
         
-        <TouchableOpacity 
-          style={styles.dateDisplay}
-          onPress={() => setSelectedDate(new Date())}
-        >
+        <TouchableOpacity style={styles.dateDisplay} onPress={() => setSelectedDate(new Date())}>
           <Ionicons name="calendar" size={20} color="#3B82F6" />
           <Text style={styles.dateText}>
             {format(selectedDate, 'EEEE d MMMM yyyy', { locale: fr })}
           </Text>
         </TouchableOpacity>
         
-        <TouchableOpacity
-          style={styles.dateArrow}
-          onPress={() => changeDate(1)}
-        >
+        <TouchableOpacity style={styles.dateArrow} onPress={() => changeDate(1)}>
           <Ionicons name="chevron-forward" size={28} color="#3B82F6" />
         </TouchableOpacity>
       </View>
@@ -437,16 +470,10 @@ export default function AppelScreen() {
         {classes.map(cls => (
           <TouchableOpacity
             key={cls.id}
-            style={[
-              styles.classChip,
-              selectedClass === cls.id && styles.classChipSelected,
-            ]}
+            style={[styles.classChip, selectedClass === cls.id && styles.classChipSelected]}
             onPress={() => setSelectedClass(cls.id)}
           >
-            <Text style={[
-              styles.classChipText,
-              selectedClass === cls.id && styles.classChipTextSelected,
-            ]}>
+            <Text style={[styles.classChipText, selectedClass === cls.id && styles.classChipTextSelected]}>
               {cls.name}
             </Text>
           </TouchableOpacity>
@@ -456,104 +483,52 @@ export default function AppelScreen() {
       {/* Stats Bar */}
       <View style={styles.statsBar}>
         <View style={styles.statItem}>
-          <Ionicons name="people" size={18} color="#6B7280" />
-          <Text style={styles.statText}>{filteredStudents.length} élèves</Text>
+          <Text style={styles.statLabel}>Matin:</Text>
+          <Text style={[styles.statValue, { color: '#EF4444' }]}>{getAbsentCount('matin')}</Text>
         </View>
         <View style={styles.statItem}>
-          <Ionicons name="close-circle" size={18} color="#EF4444" />
-          <Text style={[styles.statText, { color: '#EF4444' }]}>
-            {getAbsentCount()} absent{getAbsentCount() > 1 ? 's' : ''}
-          </Text>
+          <Text style={styles.statLabel}>Après-midi:</Text>
+          <Text style={[styles.statValue, { color: '#EF4444' }]}>{getAbsentCount('apresmidi')}</Text>
         </View>
         <View style={styles.statItem}>
-          <Ionicons name="checkmark-circle" size={18} color="#10B981" />
-          <Text style={[styles.statText, { color: '#10B981' }]}>
-            {filteredStudents.length - getAbsentCount()} présent{filteredStudents.length - getAbsentCount() > 1 ? 's' : ''}
+          <Text style={styles.statLabel}>Présents:</Text>
+          <Text style={[styles.statValue, { color: '#10B981' }]}>
+            {filteredStudents.length - getAbsentCount('total')}
           </Text>
         </View>
       </View>
 
       {/* Export Buttons */}
-      <View style={styles.exportBar}>
-        <Text style={styles.exportLabel}>Exporter cette classe:</Text>
-        <View style={styles.exportButtons}>
-          <TouchableOpacity
-            style={[styles.exportBtn, styles.exportBtnExcel]}
-            onPress={() => exportAttendance('excel')}
-            disabled={exporting}
-          >
-            {exporting ? (
-              <ActivityIndicator size="small" color="#FFFFFF" />
-            ) : (
-              <>
-                <Ionicons name="document-text" size={16} color="#FFFFFF" />
-                <Text style={styles.exportBtnText}>Excel</Text>
-              </>
-            )}
+      <View style={styles.exportSection}>
+        <View style={styles.exportRow}>
+          <Text style={styles.exportLabel}>Classe:</Text>
+          <TouchableOpacity style={[styles.exportBtn, styles.exportBtnExcel]} onPress={() => exportAttendance('excel')} disabled={exporting}>
+            <Ionicons name="document-text" size={14} color="#FFF" />
+            <Text style={styles.exportBtnText}>Excel</Text>
           </TouchableOpacity>
-          <TouchableOpacity
-            style={[styles.exportBtn, styles.exportBtnPdf]}
-            onPress={() => exportAttendance('pdf')}
-            disabled={exporting}
-          >
-            {exporting ? (
-              <ActivityIndicator size="small" color="#FFFFFF" />
-            ) : (
-              <>
-                <Ionicons name="print" size={16} color="#FFFFFF" />
-                <Text style={styles.exportBtnText}>PDF</Text>
-              </>
-            )}
+          <TouchableOpacity style={[styles.exportBtn, styles.exportBtnPdf]} onPress={() => exportAttendance('pdf')} disabled={exporting}>
+            <Ionicons name="print" size={14} color="#FFF" />
+            <Text style={styles.exportBtnText}>PDF</Text>
+          </TouchableOpacity>
+        </View>
+        <View style={styles.exportRow}>
+          <Text style={[styles.exportLabel, { color: '#DC2626' }]}>Tous absents:</Text>
+          <TouchableOpacity style={[styles.exportBtn, styles.exportBtnAllExcel]} onPress={() => exportAllAbsents('excel')} disabled={exporting}>
+            <Ionicons name="list" size={14} color="#FFF" />
+            <Text style={styles.exportBtnText}>Excel</Text>
+          </TouchableOpacity>
+          <TouchableOpacity style={[styles.exportBtn, styles.exportBtnAllPdf]} onPress={() => exportAllAbsents('pdf')} disabled={exporting}>
+            <Ionicons name="document" size={14} color="#FFF" />
+            <Text style={styles.exportBtnText}>PDF</Text>
           </TouchableOpacity>
         </View>
       </View>
 
-      {/* Export All Absents */}
-      <View style={styles.exportAllBar}>
-        <Text style={styles.exportAllLabel}>Récap. tous les absents:</Text>
-        <View style={styles.exportButtons}>
-          <TouchableOpacity
-            style={[styles.exportBtn, styles.exportBtnAllExcel]}
-            onPress={() => exportAllAbsents('excel')}
-            disabled={exporting}
-          >
-            {exporting ? (
-              <ActivityIndicator size="small" color="#FFFFFF" />
-            ) : (
-              <>
-                <Ionicons name="list" size={16} color="#FFFFFF" />
-                <Text style={styles.exportBtnText}>Excel</Text>
-              </>
-            )}
-          </TouchableOpacity>
-          <TouchableOpacity
-            style={[styles.exportBtn, styles.exportBtnAllPdf]}
-            onPress={() => exportAllAbsents('pdf')}
-            disabled={exporting}
-          >
-            {exporting ? (
-              <ActivityIndicator size="small" color="#FFFFFF" />
-            ) : (
-              <>
-                <Ionicons name="document" size={16} color="#FFFFFF" />
-                <Text style={styles.exportBtnText}>PDF</Text>
-              </>
-            )}
-          </TouchableOpacity>
-        </View>
-      </View>
-
-      {/* Legend */}
-      <View style={styles.legend}>
-        <Text style={styles.legendTitle}>Légende:</Text>
-        <View style={styles.legendItem}>
-          <View style={[styles.legendBox, { backgroundColor: '#EF4444' }]} />
-          <Text style={styles.legendText}>NJ = Non justifiée</Text>
-        </View>
-        <View style={styles.legendItem}>
-          <View style={[styles.legendBox, { backgroundColor: '#F59E0B' }]} />
-          <Text style={styles.legendText}>J = Justifiée</Text>
-        </View>
+      {/* Table Header */}
+      <View style={styles.tableHeader}>
+        <Text style={styles.tableHeaderName}>Élève</Text>
+        <Text style={styles.tableHeaderPeriod}>Matin</Text>
+        <Text style={styles.tableHeaderPeriod}>Après-midi</Text>
       </View>
 
       {/* Students List */}
@@ -562,13 +537,11 @@ export default function AppelScreen() {
         keyExtractor={(item) => item.id}
         renderItem={renderStudentItem}
         contentContainerStyle={styles.listContainer}
-        refreshControl={
-          <RefreshControl refreshing={refreshing} onRefresh={onRefresh} />
-        }
+        refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} />}
         ListEmptyComponent={
           <View style={styles.emptyContainer}>
             <Ionicons name="people-outline" size={64} color="#D1D5DB" />
-            <Text style={styles.emptyText}>Aucun élève dans cette classe</Text>
+            <Text style={styles.emptyText}>Aucun élève</Text>
           </View>
         }
       />
@@ -603,7 +576,7 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'space-between',
     backgroundColor: '#FFFFFF',
-    paddingVertical: 12,
+    paddingVertical: 10,
     paddingHorizontal: 8,
     borderBottomWidth: 1,
     borderBottomColor: '#E5E7EB',
@@ -616,32 +589,31 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     gap: 8,
     backgroundColor: '#EBF5FF',
-    paddingHorizontal: 16,
-    paddingVertical: 10,
+    paddingHorizontal: 14,
+    paddingVertical: 8,
     borderRadius: 20,
   },
   dateText: {
-    fontSize: 16,
+    fontSize: 14,
     fontWeight: '600',
     color: '#3B82F6',
     textTransform: 'capitalize',
   },
   classFilter: {
     backgroundColor: '#FFFFFF',
-    maxHeight: 56,
+    maxHeight: 50,
     borderBottomWidth: 1,
     borderBottomColor: '#E5E7EB',
   },
   classFilterContent: {
     paddingHorizontal: 12,
-    paddingVertical: 10,
-    gap: 8,
+    paddingVertical: 8,
     flexDirection: 'row',
   },
   classChip: {
-    paddingHorizontal: 20,
-    paddingVertical: 8,
-    borderRadius: 20,
+    paddingHorizontal: 16,
+    paddingVertical: 6,
+    borderRadius: 16,
     backgroundColor: '#F3F4F6',
     marginRight: 8,
   },
@@ -649,7 +621,7 @@ const styles = StyleSheet.create({
     backgroundColor: '#3B82F6',
   },
   classChipText: {
-    fontSize: 14,
+    fontSize: 13,
     fontWeight: '500',
     color: '#6B7280',
   },
@@ -660,46 +632,48 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     justifyContent: 'space-around',
     backgroundColor: '#FFFFFF',
-    paddingVertical: 12,
+    paddingVertical: 10,
     borderBottomWidth: 1,
     borderBottomColor: '#E5E7EB',
   },
   statItem: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 6,
+    gap: 4,
   },
-  statText: {
-    fontSize: 14,
-    fontWeight: '500',
+  statLabel: {
+    fontSize: 13,
     color: '#6B7280',
   },
-  exportBar: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
+  statValue: {
+    fontSize: 15,
+    fontWeight: 'bold',
+  },
+  exportSection: {
     backgroundColor: '#F9FAFB',
-    paddingVertical: 10,
-    paddingHorizontal: 16,
+    padding: 10,
+    gap: 8,
     borderBottomWidth: 1,
     borderBottomColor: '#E5E7EB',
   },
-  exportLabel: {
-    fontSize: 13,
-    fontWeight: '500',
-    color: '#6B7280',
-  },
-  exportButtons: {
+  exportRow: {
     flexDirection: 'row',
+    alignItems: 'center',
     gap: 8,
+  },
+  exportLabel: {
+    fontSize: 12,
+    fontWeight: '500',
+    color: '#374151',
+    width: 85,
   },
   exportBtn: {
     flexDirection: 'row',
     alignItems: 'center',
     gap: 4,
-    paddingHorizontal: 12,
-    paddingVertical: 8,
-    borderRadius: 8,
+    paddingHorizontal: 10,
+    paddingVertical: 6,
+    borderRadius: 6,
   },
   exportBtnExcel: {
     backgroundColor: '#10B981',
@@ -707,102 +681,53 @@ const styles = StyleSheet.create({
   exportBtnPdf: {
     backgroundColor: '#EF4444',
   },
-  exportBtnText: {
-    fontSize: 13,
-    fontWeight: '600',
-    color: '#FFFFFF',
-  },
-  exportAllBar: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    backgroundColor: '#FEF2F2',
-    paddingVertical: 10,
-    paddingHorizontal: 16,
-    borderBottomWidth: 1,
-    borderBottomColor: '#FECACA',
-  },
-  exportAllLabel: {
-    fontSize: 12,
-    fontWeight: '600',
-    color: '#DC2626',
-  },
   exportBtnAllExcel: {
     backgroundColor: '#7C3AED',
   },
   exportBtnAllPdf: {
     backgroundColor: '#DC2626',
   },
-  legend: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    backgroundColor: '#F9FAFB',
-    paddingVertical: 8,
-    paddingHorizontal: 16,
-    gap: 16,
-  },
-  legendTitle: {
+  exportBtnText: {
     fontSize: 12,
-    color: '#6B7280',
+    fontWeight: '600',
+    color: '#FFFFFF',
   },
-  legendItem: {
+  tableHeader: {
     flexDirection: 'row',
-    alignItems: 'center',
-    gap: 4,
+    backgroundColor: '#374151',
+    paddingVertical: 10,
+    paddingHorizontal: 12,
   },
-  legendBox: {
-    width: 16,
-    height: 16,
-    borderRadius: 4,
+  tableHeaderName: {
+    flex: 1,
+    fontSize: 13,
+    fontWeight: '600',
+    color: '#FFFFFF',
   },
-  legendText: {
+  tableHeaderPeriod: {
+    width: 70,
     fontSize: 12,
-    color: '#6B7280',
+    fontWeight: '600',
+    color: '#FFFFFF',
+    textAlign: 'center',
   },
   listContainer: {
-    padding: 12,
+    paddingBottom: 20,
   },
   studentRow: {
     flexDirection: 'row',
     alignItems: 'center',
     backgroundColor: '#FFFFFF',
-    padding: 12,
-    marginBottom: 8,
-    borderRadius: 12,
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 1 },
-    shadowOpacity: 0.05,
-    shadowRadius: 2,
-    elevation: 1,
+    paddingVertical: 10,
+    paddingHorizontal: 12,
+    borderBottomWidth: 1,
+    borderBottomColor: '#F3F4F6',
   },
   studentInfo: {
     flex: 1,
-    flexDirection: 'row',
-    alignItems: 'center',
-  },
-  checkbox: {
-    width: 32,
-    height: 32,
-    borderRadius: 8,
-    borderWidth: 2,
-    borderColor: '#D1D5DB',
-    justifyContent: 'center',
-    alignItems: 'center',
-    marginRight: 12,
-  },
-  checkboxChecked: {
-    backgroundColor: '#EF4444',
-    borderColor: '#EF4444',
-  },
-  checkboxJustified: {
-    backgroundColor: '#F59E0B',
-    borderColor: '#F59E0B',
-  },
-  studentDetails: {
-    flex: 1,
   },
   studentName: {
-    fontSize: 16,
+    fontSize: 14,
     fontWeight: '500',
     color: '#1F2937',
   },
@@ -810,25 +735,42 @@ const styles = StyleSheet.create({
     color: '#EF4444',
     textDecorationLine: 'line-through',
   },
-  studentClass: {
-    fontSize: 13,
-    color: '#6B7280',
-    marginTop: 2,
+  periodColumn: {
+    width: 70,
+    alignItems: 'center',
+    gap: 4,
   },
-  typeButton: {
-    paddingHorizontal: 12,
-    paddingVertical: 6,
-    borderRadius: 12,
-    marginLeft: 8,
+  periodCheckbox: {
+    width: 28,
+    height: 28,
+    borderRadius: 6,
+    borderWidth: 2,
+    borderColor: '#D1D5DB',
+    justifyContent: 'center',
+    alignItems: 'center',
+    backgroundColor: '#FFFFFF',
   },
-  typeButtonJustified: {
+  periodCheckboxAbsent: {
+    backgroundColor: '#EF4444',
+    borderColor: '#EF4444',
+  },
+  periodCheckboxJustified: {
+    backgroundColor: '#F59E0B',
+    borderColor: '#F59E0B',
+  },
+  typeTag: {
+    paddingHorizontal: 8,
+    paddingVertical: 2,
+    borderRadius: 8,
+  },
+  typeTagJ: {
     backgroundColor: '#FEF3C7',
   },
-  typeButtonUnjustified: {
+  typeTagNJ: {
     backgroundColor: '#FEE2E2',
   },
-  typeButtonText: {
-    fontSize: 14,
+  typeTagText: {
+    fontSize: 10,
     fontWeight: 'bold',
     color: '#1F2937',
   },
