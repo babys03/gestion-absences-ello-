@@ -37,11 +37,16 @@ interface ClassItem {
 
 interface AbsenceRecord {
   student_id: string;
-  absence_id?: string;
-  is_absent: boolean;
-  type: string;
+  absence_id_matin?: string;
+  absence_id_apresmidi?: string;
+  matin: boolean;
+  apresmidi: boolean;
+  type_matin: string;
+  type_apresmidi: string;
   reason?: string;
 }
+
+type Period = 'matin' | 'apresmidi';
 
 export default function AppelScreen() {
   const [students, setStudents] = useState<Student[]>([]);
