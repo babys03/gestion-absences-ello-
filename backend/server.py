@@ -319,10 +319,11 @@ async def create_absence(absence_data: AbsenceCreate):
     # Create notification if requested
     if absence_data.notify_parent:
         student_name = f"{student['first_name']} {student['last_name']}"
+        period_text = {"matin": "Matin", "apresmidi": "Après-midi", "journee": "Journée complète"}.get(absence_data.period, "Journée")
         notification = {
             "student_id": absence_data.student_id,
             "absence_id": absence_id,
-            "message": f"Absence enregistrée pour {student_name} le {absence_data.date}. Motif: {absence_data.reason or 'Non spécifié'}. Type: {absence_data.type}",
+            "message": f"Absence enregistrée pour {student_name} le {absence_data.date} ({period_text}). Motif: {absence_data.reason or 'Non spécifié'}. Type: {absence_data.type}",
             "read": False,
             "created_at": datetime.utcnow()
         }
