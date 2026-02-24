@@ -825,6 +825,295 @@ async def export_absences_pdf(
     }
 
 
+@api_router.get("/export/daily-attendance/excel")
+async def export_daily_attendance_excel(date: str, class_id: Optional[str] = None):
+    """Export daily attendance sheet to Excel format"""
+    # Get all students
+    query = {}
+    if class_id:
+        query["class_id"] = class_id
+    
+    students = await db.students.find(query).to_list(500)
+    
+    # Get absences for this date
+    absences = await db.absences.find({"date": date}).to_list(1000)
+    absence_map = {a["student_id"]: a for a in absences}
+    
+    output = io.BytesIO()
+    workbook = xlsxwriter.Workbook(output, {'in_memory': True})
+    
+    # Styles
+    title_format = workbook.add_format({
+        'bold': True,
+        'font_size': 16,
+        'align': 'center',
+        'valign': 'vcenter',
+        'bg_color': '#3B82F6',
+        'font_color': 'white'
+    })
+    header_format = workbook.add_format({
+        'bold': True,
+        'bg_color': '#E5E7EB',
+        'border': 1,
+        'align': 'center',
+        'valign': 'vcenter'
+    })
+    cell_format = workbook.add_format({
+        'border': 1,
+        'align': 'left',
+        'valign': 'vcenter'
+    })
+    present_format = workbook.add_format({
+        'border': 1,
+        'bg_color': '#D1FAE5',
+        'align': 'center',
+        'font_color': '#059669',
+        'bold': True
+    })
+    absent_format = workbook.add_format({
+        'border': 1,
+        'bg_color': '#FEE2E2',
+        'align': 'center',
+        'font_color': '#DC2626',
+        'bold': True
+    })
+    justified_format = workbook.add_format({
+        'border': 1,
+        'bg_color': '#FEF3C7',
+        'align': 'center',
+        'font_color': '#D97706',
+        'bold': True
+    })
+    
+    # Group students by class
+    classes = await db.classes.find().to_list(100)
+    class_map = {str(c["_id"]): c["name"] for c in classes}
+    
+    students_by_class = {}
+    for student in students:
+        class_name = class_map.get(student["class_id"], "Inconnu")
+        if class_name not in students_by_class:
+            students_by_class[class_name] = []
+        students_by_class[class_name].append(student)
+    
+    # Create a sheet for each class (or one sheet if class_id specified)
+    for class_name, class_students in students_by_class.items():
+        ws = workbook.add_worksheet(class_name[:31])  # Sheet name max 31 chars
+        
+        # Title
+        ws.merge_range('A1:E1', f'Feuille d\'appel - {class_name} - {date}', title_format)
+        ws.set_row(0, 30)
+        
+        # Headers
+        headers = ['N°', 'Nom', 'Prénom', 'Statut', 'Motif']
+        for col, header in enumerate(headers):
+            ws.write(2, col, header, header_format)
+        
+        ws.set_column(0, 0, 5)   # N°
+        ws.set_column(1, 1, 20)  # Nom
+        ws.set_column(2, 2, 20)  # Prénom
+        ws.set_column(3, 3, 15)  # Statut
+        ws.set_column(4, 4, 30)  # Motif
+        
+        # Sort students by last name
+        class_students.sort(key=lambda s: s["last_name"])
+        
+        row = 3
+        absent_count = 0
+        for idx, student in enumerate(class_students):
+            student_id = str(student["_id"])
+            absence = absence_map.get(student_id)
+            
+            ws.write(row, 0, idx + 1, cell_format)
+            ws.write(row, 1, student["last_name"], cell_format)
+            ws.write(row, 2, student["first_name"], cell_format)
+            
+            if absence:
+                absent_count += 1
+                if absence.get("type") == "justifiée":
+                    ws.write(row, 3, "Absent (J)", justified_format)
+                else:
+                    ws.write(row, 3, "Absent", absent_format)
+                ws.write(row, 4, absence.get("reason", ""), cell_format)
+            else:
+                ws.write(row, 3, "Présent", present_format)
+                ws.write(row, 4, "", cell_format)
+            
+            row += 1
+        
+        # Summary
+        row += 1
+        ws.write(row, 0, "Résumé:", header_format)
+        ws.merge_range(row, 1, row, 4, f"Présents: {len(class_students) - absent_count} | Absents: {absent_count} | Total: {len(class_students)}", cell_format)
+    
+    workbook.close()
+    output.seek(0)
+    
+    excel_base64 = base64.b64encode(output.getvalue()).decode('utf-8')
+    
+    return {
+        "filename": f"appel_{date}.xlsx",
+        "content": excel_base64,
+        "content_type": "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+    }
+
+
+@api_router.get("/export/daily-attendance/pdf")
+async def export_daily_attendance_pdf(date: str, class_id: Optional[str] = None):
+    """Export daily attendance sheet to PDF format"""
+    # Get all students
+    query = {}
+    if class_id:
+        query["class_id"] = class_id
+    
+    students = await db.students.find(query).to_list(500)
+    
+    # Get absences for this date
+    absences = await db.absences.find({"date": date}).to_list(1000)
+    absence_map = {a["student_id"]: a for a in absences}
+    
+    # Get classes
+    classes = await db.classes.find().to_list(100)
+    class_map = {str(c["_id"]): c["name"] for c in classes}
+    
+    # Group students by class
+    students_by_class = {}
+    for student in students:
+        class_name = class_map.get(student["class_id"], "Inconnu")
+        if class_name not in students_by_class:
+            students_by_class[class_name] = []
+        students_by_class[class_name].append(student)
+    
+    # Create PDF
+    buffer = io.BytesIO()
+    doc = SimpleDocTemplate(
+        buffer,
+        pagesize=A4,
+        rightMargin=15*mm,
+        leftMargin=15*mm,
+        topMargin=15*mm,
+        bottomMargin=15*mm
+    )
+    
+    elements = []
+    styles = getSampleStyleSheet()
+    
+    # Title style
+    title_style = ParagraphStyle(
+        'CustomTitle',
+        parent=styles['Heading1'],
+        fontSize=16,
+        spaceAfter=10,
+        textColor=colors.HexColor('#1F2937'),
+        alignment=1
+    )
+    
+    subtitle_style = ParagraphStyle(
+        'Subtitle',
+        parent=styles['Normal'],
+        fontSize=12,
+        spaceAfter=15,
+        textColor=colors.HexColor('#6B7280'),
+        alignment=1
+    )
+    
+    for class_name, class_students in students_by_class.items():
+        # Class title
+        elements.append(Paragraph(f"Feuille d'Appel - {class_name}", title_style))
+        elements.append(Paragraph(f"Date: {date}", subtitle_style))
+        
+        # Sort students
+        class_students.sort(key=lambda s: s["last_name"])
+        
+        # Build table data
+        table_data = [['N°', 'Nom', 'Prénom', 'Statut', 'Signature']]
+        
+        absent_count = 0
+        for idx, student in enumerate(class_students):
+            student_id = str(student["_id"])
+            absence = absence_map.get(student_id)
+            
+            if absence:
+                absent_count += 1
+                if absence.get("type") == "justifiée":
+                    status = "Absent (J)"
+                else:
+                    status = "Absent"
+            else:
+                status = "Présent"
+            
+            table_data.append([
+                str(idx + 1),
+                student["last_name"],
+                student["first_name"],
+                status,
+                ""  # Signature column for manual signing
+            ])
+        
+        # Create table
+        table = Table(table_data, colWidths=[12*mm, 45*mm, 45*mm, 30*mm, 35*mm])
+        
+        # Table style
+        style_commands = [
+            ('BACKGROUND', (0, 0), (-1, 0), colors.HexColor('#3B82F6')),
+            ('TEXTCOLOR', (0, 0), (-1, 0), colors.white),
+            ('ALIGN', (0, 0), (-1, -1), 'CENTER'),
+            ('FONTNAME', (0, 0), (-1, 0), 'Helvetica-Bold'),
+            ('FONTSIZE', (0, 0), (-1, -1), 9),
+            ('BOTTOMPADDING', (0, 0), (-1, 0), 10),
+            ('TOPPADDING', (0, 0), (-1, 0), 10),
+            ('GRID', (0, 0), (-1, -1), 0.5, colors.HexColor('#D1D5DB')),
+            ('VALIGN', (0, 0), (-1, -1), 'MIDDLE'),
+            ('ROWHEIGHTS', (0, 1), (-1, -1), 20),
+        ]
+        
+        # Color rows based on status
+        for i, row in enumerate(table_data[1:], start=1):
+            if "Absent (J)" in row[3]:
+                style_commands.append(('BACKGROUND', (3, i), (3, i), colors.HexColor('#FEF3C7')))
+            elif "Absent" in row[3]:
+                style_commands.append(('BACKGROUND', (3, i), (3, i), colors.HexColor('#FEE2E2')))
+            else:
+                style_commands.append(('BACKGROUND', (3, i), (3, i), colors.HexColor('#D1FAE5')))
+        
+        table.setStyle(TableStyle(style_commands))
+        elements.append(table)
+        
+        # Summary
+        elements.append(Spacer(1, 10))
+        summary_text = f"Présents: {len(class_students) - absent_count} | Absents: {absent_count} | Total: {len(class_students)}"
+        elements.append(Paragraph(summary_text, styles['Normal']))
+        
+        # Signature area
+        elements.append(Spacer(1, 20))
+        sig_data = [
+            ['Signature de l\'enseignant:', '', 'Date:', date],
+        ]
+        sig_table = Table(sig_data, colWidths=[50*mm, 50*mm, 25*mm, 40*mm])
+        sig_table.setStyle(TableStyle([
+            ('ALIGN', (0, 0), (-1, -1), 'LEFT'),
+            ('FONTSIZE', (0, 0), (-1, -1), 10),
+            ('BOTTOMPADDING', (0, 0), (-1, -1), 20),
+        ]))
+        elements.append(sig_table)
+        
+        # Page break between classes
+        if list(students_by_class.keys()).index(class_name) < len(students_by_class) - 1:
+            from reportlab.platypus import PageBreak
+            elements.append(PageBreak())
+    
+    doc.build(elements)
+    buffer.seek(0)
+    
+    pdf_base64 = base64.b64encode(buffer.getvalue()).decode('utf-8')
+    
+    return {
+        "filename": f"appel_{date}.pdf",
+        "content": pdf_base64,
+        "content_type": "application/pdf"
+    }
+
+
 @api_router.get("/export/students/excel")
 async def export_students_excel(class_id: Optional[str] = None):
     """Export students list to Excel format"""
