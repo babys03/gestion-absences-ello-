@@ -980,17 +980,6 @@ async def export_daily_attendance_excel(date: str, class_id: Optional[str] = Non
         row += 1
         ws.write(row, 0, "Résumé:", header_format)
         ws.merge_range(row, 1, row, 5, f"Matin - Absents: {absent_matin_count} | Après-midi - Absents: {absent_apresmidi_count} | Total élèves: {len(class_students)}", cell_format)
-                ws.write(row, 4, absence.get("reason", ""), cell_format)
-            else:
-                ws.write(row, 3, "Présent", present_format)
-                ws.write(row, 4, "", cell_format)
-            
-            row += 1
-        
-        # Summary
-        row += 1
-        ws.write(row, 0, "Résumé:", header_format)
-        ws.merge_range(row, 1, row, 4, f"Présents: {len(class_students) - absent_count} | Absents: {absent_count} | Total: {len(class_students)}", cell_format)
     
     workbook.close()
     output.seek(0)
