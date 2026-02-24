@@ -578,6 +578,44 @@ const styles = StyleSheet.create({
     fontWeight: '500',
     color: '#6B7280',
   },
+  exportBar: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    backgroundColor: '#F9FAFB',
+    paddingVertical: 10,
+    paddingHorizontal: 16,
+    borderBottomWidth: 1,
+    borderBottomColor: '#E5E7EB',
+  },
+  exportLabel: {
+    fontSize: 13,
+    fontWeight: '500',
+    color: '#6B7280',
+  },
+  exportButtons: {
+    flexDirection: 'row',
+    gap: 8,
+  },
+  exportBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+    borderRadius: 8,
+  },
+  exportBtnExcel: {
+    backgroundColor: '#10B981',
+  },
+  exportBtnPdf: {
+    backgroundColor: '#EF4444',
+  },
+  exportBtnText: {
+    fontSize: 13,
+    fontWeight: '600',
+    color: '#FFFFFF',
+  },
   legend: {
     flexDirection: 'row',
     alignItems: 'center',
