@@ -210,6 +210,67 @@ export default function AppelScreen() {
     return Array.from(absences.values()).filter(a => a.is_absent).length;
   };
 
+  const exportAttendance = async (type: 'pdf' | 'excel') => {
+    setExporting(true);
+    try {
+      const dateStr = format(selectedDate, 'yyyy-MM-dd');
+      let url = `${API_URL}/api/export/daily-attendance/${type}?date=${dateStr}`;
+      if (selectedClass) {
+        url += `&class_id=${selectedClass}`;
+      }
+
+      const response = await fetch(url);
+      
+      if (!response.ok) {
+        throw new Error('Erreur lors de la génération');
+      }
+
+      const data = await response.json();
+      
+      if (Platform.OS === 'web') {
+        // Web download
+        const byteCharacters = atob(data.content);
+        const byteNumbers = new Array(byteCharacters.length);
+        for (let i = 0; i < byteCharacters.length; i++) {
+          byteNumbers[i] = byteCharacters.charCodeAt(i);
+        }
+        const byteArray = new Uint8Array(byteNumbers);
+        const blob = new Blob([byteArray], { type: data.content_type });
+        const downloadUrl = window.URL.createObjectURL(blob);
+        const link = document.createElement('a');
+        link.href = downloadUrl;
+        link.download = data.filename;
+        document.body.appendChild(link);
+        link.click();
+        document.body.removeChild(link);
+        window.URL.revokeObjectURL(downloadUrl);
+        
+        Alert.alert('Succès', `Fichier téléchargé: ${data.filename}`);
+      } else {
+        // Mobile download
+        const fileUri = FileSystem.documentDirectory + data.filename;
+        await FileSystem.writeAsStringAsync(fileUri, data.content, {
+          encoding: FileSystem.EncodingType.Base64,
+        });
+        
+        const canShare = await Sharing.isAvailableAsync();
+        if (canShare) {
+          await Sharing.shareAsync(fileUri, {
+            mimeType: data.content_type,
+            dialogTitle: `Partager ${data.filename}`,
+          });
+        } else {
+          Alert.alert('Succès', `Fichier sauvegardé: ${data.filename}`);
+        }
+      }
+    } catch (error) {
+      console.error('Export error:', error);
+      Alert.alert('Erreur', 'Impossible de générer le fichier');
+    } finally {
+      setExporting(false);
+    }
+  };
+
   const filteredStudents = students.filter(s => 
     !selectedClass || s.class_id === selectedClass
   );
