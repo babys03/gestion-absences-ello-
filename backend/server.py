@@ -99,6 +99,7 @@ class StudentResponse(BaseModel):
 class AbsenceCreate(BaseModel):
     student_id: str
     date: str  # Format: YYYY-MM-DD
+    period: str = "journee"  # "matin", "apresmidi", "journee"
     reason: Optional[str] = None
     type: str = "non_justifiée"  # "justifiée" or "non_justifiée"
     notify_parent: bool = True
@@ -106,6 +107,7 @@ class AbsenceCreate(BaseModel):
 class AbsenceUpdate(BaseModel):
     reason: Optional[str] = None
     type: Optional[str] = None
+    period: Optional[str] = None
 
 class AbsenceResponse(BaseModel):
     id: str
@@ -113,6 +115,7 @@ class AbsenceResponse(BaseModel):
     student_name: Optional[str] = None
     class_name: Optional[str] = None
     date: str
+    period: str = "journee"
     reason: Optional[str] = None
     type: str
     notified: bool = False
