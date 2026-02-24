@@ -707,6 +707,27 @@ const styles = StyleSheet.create({
     fontWeight: '600',
     color: '#FFFFFF',
   },
+  exportAllBar: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    backgroundColor: '#FEF2F2',
+    paddingVertical: 10,
+    paddingHorizontal: 16,
+    borderBottomWidth: 1,
+    borderBottomColor: '#FECACA',
+  },
+  exportAllLabel: {
+    fontSize: 12,
+    fontWeight: '600',
+    color: '#DC2626',
+  },
+  exportBtnAllExcel: {
+    backgroundColor: '#7C3AED',
+  },
+  exportBtnAllPdf: {
+    backgroundColor: '#DC2626',
+  },
   legend: {
     flexDirection: 'row',
     alignItems: 'center',
