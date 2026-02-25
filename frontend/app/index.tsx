@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useCallback } from 'react';
 import {
   View,
   Text,
@@ -9,7 +9,9 @@ import {
   ActivityIndicator,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
-import { useFocusEffect } from 'expo-router';
+import { useFocusEffect, useRouter } from 'expo-router';
+import { format } from 'date-fns';
+import { fr } from 'date-fns/locale';
 
 const API_URL = process.env.EXPO_PUBLIC_BACKEND_URL;
 
@@ -32,6 +34,7 @@ interface Notification {
 }
 
 export default function Dashboard() {
+  const router = useRouter();
   const [stats, setStats] = useState<Statistics | null>(null);
   const [notifications, setNotifications] = useState<Notification[]>([]);
   const [loading, setLoading] = useState(true);
@@ -75,11 +78,16 @@ export default function Dashboard() {
   if (loading) {
     return (
       <View style={styles.loadingContainer}>
-        <ActivityIndicator size="large" color="#3B82F6" />
+        <View style={styles.loadingIcon}>
+          <Ionicons name="school" size={48} color="#3B82F6" />
+        </View>
+        <ActivityIndicator size="large" color="#3B82F6" style={{ marginTop: 20 }} />
         <Text style={styles.loadingText}>Chargement...</Text>
       </View>
     );
   }
+
+  const today = format(new Date(), "EEEE d MMMM yyyy", { locale: fr });
 
   return (
     <ScrollView
@@ -88,28 +96,63 @@ export default function Dashboard() {
         <RefreshControl refreshing={refreshing} onRefresh={onRefresh} />
       }
     >
+      {/* Header */}
+      <View style={styles.header}>
+        <View style={styles.headerContent}>
+          <Ionicons name="school" size={32} color="#FFFFFF" />
+          <View style={styles.headerText}>
+            <Text style={styles.appTitle}>Gestion des Absences</Text>
+            <Text style={styles.dateText}>{today}</Text>
+          </View>
+        </View>
+      </View>
+
+      {/* Quick Action */}
+      <TouchableOpacity 
+        style={styles.quickAction}
+        onPress={() => router.push('/appel')}
+        activeOpacity={0.8}
+      >
+        <View style={styles.quickActionIcon}>
+          <Ionicons name="checkbox" size={28} color="#FFFFFF" />
+        </View>
+        <View style={styles.quickActionContent}>
+          <Text style={styles.quickActionTitle}>Faire l'appel</Text>
+          <Text style={styles.quickActionSubtitle}>Marquer les absences du jour</Text>
+        </View>
+        <Ionicons name="chevron-forward" size={24} color="#FFFFFF" />
+      </TouchableOpacity>
+
       {/* Stats Cards */}
       <View style={styles.statsGrid}>
         <View style={[styles.statCard, { backgroundColor: '#3B82F6' }]}>
-          <Ionicons name="people" size={32} color="#FFFFFF" />
+          <View style={styles.statIconContainer}>
+            <Ionicons name="people" size={24} color="#FFFFFF" />
+          </View>
           <Text style={styles.statNumber}>{stats?.total_students || 0}</Text>
           <Text style={styles.statLabel}>Élèves</Text>
         </View>
         
         <View style={[styles.statCard, { backgroundColor: '#10B981' }]}>
-          <Ionicons name="school" size={32} color="#FFFFFF" />
+          <View style={styles.statIconContainer}>
+            <Ionicons name="school" size={24} color="#FFFFFF" />
+          </View>
           <Text style={styles.statNumber}>{stats?.total_classes || 0}</Text>
           <Text style={styles.statLabel}>Classes</Text>
         </View>
         
         <View style={[styles.statCard, { backgroundColor: '#F59E0B' }]}>
-          <Ionicons name="calendar" size={32} color="#FFFFFF" />
+          <View style={styles.statIconContainer}>
+            <Ionicons name="calendar" size={24} color="#FFFFFF" />
+          </View>
           <Text style={styles.statNumber}>{stats?.total_absences || 0}</Text>
           <Text style={styles.statLabel}>Absences</Text>
         </View>
         
         <View style={[styles.statCard, { backgroundColor: '#EF4444' }]}>
-          <Ionicons name="alert-circle" size={32} color="#FFFFFF" />
+          <View style={styles.statIconContainer}>
+            <Ionicons name="alert-circle" size={24} color="#FFFFFF" />
+          </View>
           <Text style={styles.statNumber}>{stats?.unjustified_absences || 0}</Text>
           <Text style={styles.statLabel}>Non justifiées</Text>
         </View>
@@ -117,12 +160,17 @@ export default function Dashboard() {
 
       {/* Absences by Class */}
       <View style={styles.section}>
-        <Text style={styles.sectionTitle}>Absences par classe</Text>
+        <View style={styles.sectionHeader}>
+          <Ionicons name="stats-chart" size={20} color="#3B82F6" />
+          <Text style={styles.sectionTitle}>Absences par classe</Text>
+        </View>
         {stats?.absences_by_class && stats.absences_by_class.length > 0 ? (
-          stats.absences_by_class.map((item, index) => (
+          stats.absences_by_class.slice(0, 5).map((item, index) => (
             <View key={index} style={styles.listItem}>
               <View style={styles.listItemLeft}>
-                <Ionicons name="school-outline" size={20} color="#6B7280" />
+                <View style={[styles.classIcon, { backgroundColor: `hsl(${index * 60}, 70%, 50%)` }]}>
+                  <Text style={styles.classIconText}>{item.class_name.charAt(0)}</Text>
+                </View>
                 <Text style={styles.listItemText}>{item.class_name}</Text>
               </View>
               <View style={styles.badge}>
@@ -131,18 +179,29 @@ export default function Dashboard() {
             </View>
           ))
         ) : (
-          <Text style={styles.emptyText}>Aucune donnée disponible</Text>
+          <View style={styles.emptyState}>
+            <Ionicons name="checkmark-circle" size={40} color="#10B981" />
+            <Text style={styles.emptyStateText}>Aucune absence enregistrée</Text>
+          </View>
         )}
       </View>
 
       {/* Top Absent Students */}
       <View style={styles.section}>
-        <Text style={styles.sectionTitle}>Élèves les plus absents</Text>
+        <View style={styles.sectionHeader}>
+          <Ionicons name="warning" size={20} color="#EF4444" />
+          <Text style={styles.sectionTitle}>Élèves les plus absents</Text>
+        </View>
         {stats?.top_absent_students && stats.top_absent_students.length > 0 ? (
           stats.top_absent_students.slice(0, 5).map((item, index) => (
             <View key={index} style={styles.listItem}>
               <View style={styles.listItemLeft}>
-                <View style={styles.rankBadge}>
+                <View style={[
+                  styles.rankBadge,
+                  index === 0 && styles.rankBadgeGold,
+                  index === 1 && styles.rankBadgeSilver,
+                  index === 2 && styles.rankBadgeBronze,
+                ]}>
                   <Text style={styles.rankText}>{index + 1}</Text>
                 </View>
                 <View>
@@ -156,17 +215,23 @@ export default function Dashboard() {
             </View>
           ))
         ) : (
-          <Text style={styles.emptyText}>Aucune donnée disponible</Text>
+          <View style={styles.emptyState}>
+            <Ionicons name="happy" size={40} color="#10B981" />
+            <Text style={styles.emptyStateText}>Pas d'absences répétées</Text>
+          </View>
         )}
       </View>
 
       {/* Recent Notifications */}
       <View style={styles.section}>
-        <Text style={styles.sectionTitle}>Notifications récentes</Text>
+        <View style={styles.sectionHeader}>
+          <Ionicons name="notifications" size={20} color="#F59E0B" />
+          <Text style={styles.sectionTitle}>Notifications récentes</Text>
+        </View>
         {notifications.length > 0 ? (
           notifications.map((notif) => (
             <View key={notif.id} style={styles.notificationItem}>
-              <Ionicons name="notifications" size={20} color="#F59E0B" />
+              <View style={styles.notificationDot} />
               <View style={styles.notificationContent}>
                 <Text style={styles.notificationStudent}>{notif.student_name}</Text>
                 <Text style={styles.notificationMessage} numberOfLines={2}>
@@ -176,11 +241,14 @@ export default function Dashboard() {
             </View>
           ))
         ) : (
-          <Text style={styles.emptyText}>Aucune notification non lue</Text>
+          <View style={styles.emptyState}>
+            <Ionicons name="mail-open" size={40} color="#9CA3AF" />
+            <Text style={styles.emptyStateText}>Aucune notification</Text>
+          </View>
         )}
       </View>
 
-      <View style={{ height: 20 }} />
+      <View style={{ height: 30 }} />
     </ScrollView>
   );
 }
@@ -196,45 +264,122 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     backgroundColor: '#F3F4F6',
   },
+  loadingIcon: {
+    width: 80,
+    height: 80,
+    borderRadius: 40,
+    backgroundColor: '#EBF5FF',
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
   loadingText: {
-    marginTop: 10,
+    marginTop: 12,
     color: '#6B7280',
     fontSize: 16,
+  },
+  header: {
+    backgroundColor: '#3B82F6',
+    paddingTop: 20,
+    paddingBottom: 30,
+    paddingHorizontal: 20,
+    borderBottomLeftRadius: 24,
+    borderBottomRightRadius: 24,
+  },
+  headerContent: {
+    flexDirection: 'row',
+    alignItems: 'center',
+  },
+  headerText: {
+    marginLeft: 12,
+  },
+  appTitle: {
+    fontSize: 22,
+    fontWeight: 'bold',
+    color: '#FFFFFF',
+  },
+  dateText: {
+    fontSize: 14,
+    color: 'rgba(255,255,255,0.8)',
+    marginTop: 2,
+    textTransform: 'capitalize',
+  },
+  quickAction: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: '#10B981',
+    marginHorizontal: 16,
+    marginTop: -20,
+    padding: 16,
+    borderRadius: 16,
+    shadowColor: '#10B981',
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.3,
+    shadowRadius: 8,
+    elevation: 8,
+  },
+  quickActionIcon: {
+    width: 48,
+    height: 48,
+    borderRadius: 12,
+    backgroundColor: 'rgba(255,255,255,0.2)',
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  quickActionContent: {
+    flex: 1,
+    marginLeft: 12,
+  },
+  quickActionTitle: {
+    fontSize: 18,
+    fontWeight: '600',
+    color: '#FFFFFF',
+  },
+  quickActionSubtitle: {
+    fontSize: 13,
+    color: 'rgba(255,255,255,0.8)',
+    marginTop: 2,
   },
   statsGrid: {
     flexDirection: 'row',
     flexWrap: 'wrap',
     padding: 12,
+    paddingTop: 20,
     gap: 12,
   },
   statCard: {
     width: '47%',
     padding: 16,
-    borderRadius: 12,
-    alignItems: 'center',
+    borderRadius: 16,
     shadowColor: '#000',
     shadowOffset: { width: 0, height: 2 },
     shadowOpacity: 0.1,
     shadowRadius: 4,
     elevation: 3,
   },
+  statIconContainer: {
+    width: 40,
+    height: 40,
+    borderRadius: 10,
+    backgroundColor: 'rgba(255,255,255,0.2)',
+    justifyContent: 'center',
+    alignItems: 'center',
+    marginBottom: 8,
+  },
   statNumber: {
-    fontSize: 32,
+    fontSize: 28,
     fontWeight: 'bold',
     color: '#FFFFFF',
-    marginTop: 8,
   },
   statLabel: {
-    fontSize: 14,
-    color: '#FFFFFF',
-    opacity: 0.9,
-    marginTop: 4,
+    fontSize: 13,
+    color: 'rgba(255,255,255,0.9)',
+    marginTop: 2,
   },
   section: {
     backgroundColor: '#FFFFFF',
-    marginHorizontal: 12,
-    marginTop: 12,
-    borderRadius: 12,
+    marginHorizontal: 16,
+    marginTop: 16,
+    borderRadius: 16,
     padding: 16,
     shadowColor: '#000',
     shadowOffset: { width: 0, height: 1 },
@@ -242,11 +387,16 @@ const styles = StyleSheet.create({
     shadowRadius: 2,
     elevation: 2,
   },
+  sectionHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginBottom: 16,
+    gap: 8,
+  },
   sectionTitle: {
-    fontSize: 18,
+    fontSize: 17,
     fontWeight: '600',
     color: '#1F2937',
-    marginBottom: 12,
   },
   listItem: {
     flexDirection: 'row',
@@ -260,21 +410,35 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     gap: 12,
+    flex: 1,
+  },
+  classIcon: {
+    width: 36,
+    height: 36,
+    borderRadius: 10,
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  classIconText: {
+    fontSize: 16,
+    fontWeight: 'bold',
+    color: '#FFFFFF',
   },
   listItemText: {
-    fontSize: 16,
+    fontSize: 15,
     color: '#374151',
+    fontWeight: '500',
   },
   listItemSubtext: {
-    fontSize: 13,
+    fontSize: 12,
     color: '#9CA3AF',
     marginTop: 2,
   },
   badge: {
     backgroundColor: '#EBF5FF',
     paddingHorizontal: 12,
-    paddingVertical: 4,
-    borderRadius: 16,
+    paddingVertical: 6,
+    borderRadius: 20,
   },
   badgeText: {
     fontSize: 14,
@@ -285,20 +449,32 @@ const styles = StyleSheet.create({
     width: 28,
     height: 28,
     borderRadius: 14,
-    backgroundColor: '#3B82F6',
+    backgroundColor: '#6B7280',
     justifyContent: 'center',
     alignItems: 'center',
   },
+  rankBadgeGold: {
+    backgroundColor: '#F59E0B',
+  },
+  rankBadgeSilver: {
+    backgroundColor: '#9CA3AF',
+  },
+  rankBadgeBronze: {
+    backgroundColor: '#CD7F32',
+  },
   rankText: {
-    fontSize: 14,
+    fontSize: 12,
     fontWeight: 'bold',
     color: '#FFFFFF',
   },
-  emptyText: {
+  emptyState: {
+    alignItems: 'center',
+    paddingVertical: 24,
+  },
+  emptyStateText: {
     fontSize: 14,
     color: '#9CA3AF',
-    textAlign: 'center',
-    paddingVertical: 20,
+    marginTop: 8,
   },
   notificationItem: {
     flexDirection: 'row',
@@ -308,11 +484,18 @@ const styles = StyleSheet.create({
     borderBottomWidth: 1,
     borderBottomColor: '#F3F4F6',
   },
+  notificationDot: {
+    width: 10,
+    height: 10,
+    borderRadius: 5,
+    backgroundColor: '#F59E0B',
+    marginTop: 5,
+  },
   notificationContent: {
     flex: 1,
   },
   notificationStudent: {
-    fontSize: 15,
+    fontSize: 14,
     fontWeight: '600',
     color: '#1F2937',
   },
@@ -320,5 +503,6 @@ const styles = StyleSheet.create({
     fontSize: 13,
     color: '#6B7280',
     marginTop: 4,
+    lineHeight: 18,
   },
 });
