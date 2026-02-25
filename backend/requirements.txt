@@ -1,9 +1,10 @@
 fastapi==0.110.1
 uvicorn==0.25.0
 pymongo==4.5.0
+motor==3.3.1
 python-dotenv==1.2.1
 python-multipart==0.0.22
 pydantic==2.12.5
-openpyxl==3.1.5
-fpdf2==2.8.3
+reportlab==4.4.10
+xlsxwriter==3.2.9
 dnspython==2.8.0
