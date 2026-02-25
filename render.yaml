@@ -2,6 +2,7 @@
 # Plus d'infos: https://render.com/docs/blueprint-spec
 
 services:
+  # Backend API
   - type: web
     name: absences-api
     env: python
@@ -10,7 +11,19 @@ services:
     startCommand: uvicorn server:app --host 0.0.0.0 --port $PORT
     envVars:
       - key: MONGO_URL
-        sync: false  # À configurer manuellement avec votre URL MongoDB Atlas
+        sync: false
       - key: DB_NAME
         value: absences
     healthCheckPath: /api/
+
+  # Frontend Web
+  - type: web
+    name: absences-frontend
+    env: static
+    rootDir: frontend
+    buildCommand: npm install && EXPO_PUBLIC_BACKEND_URL=https://gestion-absences-ello-1.onrender.com npx expo export --platform web
+    staticPublishPath: dist
+    headers:
+      - path: /*
+        name: Cache-Control
+        value: no-cache
