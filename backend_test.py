@@ -10,7 +10,7 @@ from datetime import datetime, date, timedelta
 import time
 
 # API Base URL
-BASE_URL = "https://school-attendance-46.preview.emergentagent.com/api"
+BASE_URL = "https://gestion-presences.preview.emergentagent.com/api"
 
 class TestRunner:
     def __init__(self):
